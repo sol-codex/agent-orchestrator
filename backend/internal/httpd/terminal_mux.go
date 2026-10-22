@@ -21,21 +21,26 @@ const terminalMuxReadLimit = 1 << 20
 // is intentionally outside the per-request Timeout middleware (the connection is
 // long-lived). When mgr is nil the route is not mounted — the daemon simply has
 // no terminal surface yet.
-func mountTerminalMux(r chi.Router, mgr *terminal.Manager, log *slog.Logger) {
+func mountTerminalMux(r chi.Router, mgr *terminal.Manager, log *slog.Logger, allowedOrigins []string) {
 	if mgr == nil {
 		return
 	}
-	r.Get("/mux", terminalMuxHandler(mgr, log))
+	r.Get("/mux", terminalMuxHandler(mgr, log, allowedOrigins))
 }
 
 // terminalMuxHandler upgrades the request to a WebSocket and hands the connection to the
 // terminal manager. httpd owns only the upgrade and the transport adaptation;
 // all stream logic lives in internal/terminal.
-func terminalMuxHandler(mgr *terminal.Manager, log *slog.Logger) http.HandlerFunc {
+func terminalMuxHandler(mgr *terminal.Manager, log *slog.Logger, allowedOrigins []string) http.HandlerFunc {
+	allowed := exactAllowedOrigins(allowedOrigins)
 	return func(w http.ResponseWriter, r *http.Request) {
-		// InsecureSkipVerify disables coder/websocket's same-origin check: the
-		// daemon binds loopback only and the desktop renderer's origin differs
-		// from the loopback host, mirroring the legacy Node mux server.
+		if isPreviewHost(r.Host) || !browserRequestAllowed(r, allowed) {
+			writeOriginForbidden(w, r)
+			return
+		}
+		// The exact-origin policy above handles app://renderer and authenticated
+		// native mobile clients, which the library's same-host check cannot.
+		// Never call Accept with this option before validating that policy.
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			log.Warn("terminal mux: websocket upgrade failed", "err", err)
