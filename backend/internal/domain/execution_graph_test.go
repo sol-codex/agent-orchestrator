@@ -274,6 +274,44 @@ func TestExecutionGraphAssignmentProviderSurvivesRestart(t *testing.T) {
 	}
 }
 
+func TestExecutionGraphReviewHistoryValidationAndContinuity(t *testing.T) {
+	graph := validExecutionGraph()
+	finished := time.Unix(100, 0).UTC()
+	graph.Tasks[1].State = TaskReady
+	graph.Tasks[1].Attempts = []TaskAttempt{{ID: "attempt-1", AgentID: "codex", FinishedAt: &finished}}
+	graph.Tasks[1].Reviews = []TaskReviewRecord{{
+		AttemptID: "attempt-1", Decision: "revise", ReviewedAt: finished,
+		SourceHead: "0123456789abcdef0123456789abcdef01234567",
+		PRURL:      "https://github.com/sol-codex/agent-orchestrator/pull/4",
+	}}
+	if err := ValidateExecutionGraph(graph); err != nil {
+		t.Fatalf("valid review history: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ExecutionGraph)
+	}{
+		{"unknown attempt", func(g *ExecutionGraph) { g.Tasks[1].Reviews[0].AttemptID = "missing" }},
+		{"duplicate decision", func(g *ExecutionGraph) { g.Tasks[1].Reviews = append(g.Tasks[1].Reviews, g.Tasks[1].Reviews[0]) }},
+		{"invalid source head", func(g *ExecutionGraph) { g.Tasks[1].Reviews[0].SourceHead = "short" }},
+		{"credential URL", func(g *ExecutionGraph) { g.Tasks[1].Reviews[0].PRURL = "https://user:secret@example.com/pull/1" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := cloneExecutionGraph(t, graph)
+			tc.mutate(&candidate)
+			if err := ValidateExecutionGraph(candidate); err == nil {
+				t.Fatal("invalid review history accepted")
+			}
+		})
+	}
+	next := cloneExecutionGraph(t, graph)
+	next.Revision++
+	next.Tasks[1].Reviews[0].ValidationSummary = "rewritten"
+	if err := ValidateExecutionGraphTransition(graph, next); err == nil || !strings.Contains(err.Error(), "review history changed") {
+		t.Fatalf("review rewrite error = %v", err)
+	}
+}
+
 func cloneExecutionGraph(t *testing.T, graph ExecutionGraph) ExecutionGraph {
 	t.Helper()
 	encoded, err := json.Marshal(graph)

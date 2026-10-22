@@ -16981,6 +16981,30 @@ components:
       - selection
       - sourceRole
       type: object
+    DomainTaskReviewRecord:
+      properties:
+        attemptId:
+          type: string
+        decision:
+          type: string
+        evidenceRefs:
+          items:
+            type: string
+          type: array
+        prUrl:
+          type: string
+        reviewedAt:
+          format: date-time
+          type: string
+        sourceHead:
+          type: string
+        validationSummary:
+          type: string
+      required:
+      - attemptId
+      - decision
+      - reviewedAt
+      type: object
     EditConversationMessageRequest:
       properties:
         clientMessageId:
@@ -17223,6 +17247,10 @@ components:
         resources:
           items:
             type: string
+          type: array
+        reviews:
+          items:
+            $ref: '#/components/schemas/DomainTaskReviewRecord'
           type: array
         scope:
           type: string
@@ -19215,6 +19243,16 @@ components:
           - accept
           - revise
           - reject
+          type: string
+        evidenceRefs:
+          items:
+            type: string
+          type: array
+        prUrl:
+          type: string
+        sourceHead:
+          type: string
+        validationSummary:
           type: string
       required:
       - attemptId
