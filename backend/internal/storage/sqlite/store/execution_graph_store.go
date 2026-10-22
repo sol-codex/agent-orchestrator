@@ -52,6 +52,13 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 			if graph.Revision != 1 {
 				return execution.ErrGraphConflict
 			}
+			var projectID string
+			if err := db.QueryRowContext(ctx, `SELECT id FROM projects WHERE id = ?`, string(graph.ProjectID)).Scan(&projectID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return execution.ErrGraphProjectNotFound
+				}
+				return err
+			}
 			for _, task := range graph.Tasks {
 				if task.Assignment != nil || len(task.Attempts) != 0 || runtimeState(task.State) {
 					return fmt.Errorf("%w: graph %q imported task %q", execution.ErrGraphRuntimeFacts, graph.ID, task.ID)

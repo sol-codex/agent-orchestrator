@@ -56,6 +56,14 @@ func mustGraph(t *testing.T, s *sqlite.Store, id string) domain.ExecutionGraph {
 	return graph
 }
 
+func TestExecutionGraphImportRejectsUnknownProject(t *testing.T) {
+	s := newTestStore(t)
+	err := s.SaveExecutionGraph(context.Background(), testGraph("g-missing", "missing-project", graphTask("t", domain.TaskPending)))
+	if !errors.Is(err, execution.ErrGraphProjectNotFound) {
+		t.Fatalf("unknown project error = %v, want ErrGraphProjectNotFound", err)
+	}
+}
+
 func TestExecutionGraphPlanRevisionAndRuntimeFence(t *testing.T) {
 	s := newTestStore(t)
 	seedProject(t, s, "project")

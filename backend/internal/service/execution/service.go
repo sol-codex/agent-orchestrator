@@ -49,10 +49,11 @@ const (
 
 var (
 	// ErrGraphConflict means a persisted revision or attempt already changed.
-	ErrGraphConflict      = errors.New("execution graph revision conflict")
-	ErrInvalidDecision    = errors.New("invalid execution review decision")
-	ErrGraphRuntimeFacts  = errors.New("execution graph runtime facts are scheduler-owned")
-	ErrReviewAttemptLimit = errors.New("execution review revision attempt limit reached")
+	ErrGraphConflict        = errors.New("execution graph revision conflict")
+	ErrInvalidDecision      = errors.New("invalid execution review decision")
+	ErrGraphRuntimeFacts    = errors.New("execution graph runtime facts are scheduler-owned")
+	ErrGraphProjectNotFound = errors.New("execution graph project not found")
+	ErrReviewAttemptLimit   = errors.New("execution review revision attempt limit reached")
 )
 
 // Store is the durable execution boundary. Every successful mutation must

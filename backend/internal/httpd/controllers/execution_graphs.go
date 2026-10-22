@@ -366,6 +366,10 @@ func graphConflict(w http.ResponseWriter, r *http.Request, message string) {
 }
 
 func graphWriteError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, execution.ErrGraphProjectNotFound) {
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "PROJECT_NOT_FOUND", "Execution graph project not found", nil)
+		return
+	}
 	if errors.Is(err, execution.ErrGraphConflict) {
 		graphConflict(w, r, "Execution graph revision or task state changed")
 		return

@@ -313,6 +313,15 @@ func TestExecutionGraphRuntimeFactsAreBadRequests(t *testing.T) {
 	}
 }
 
+func TestExecutionGraphUnknownProjectIsNotFound(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/execution-graphs", nil)
+	graphWriteError(recorder, request, execution.ErrGraphProjectNotFound)
+	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), "PROJECT_NOT_FOUND") {
+		t.Fatalf("unknown project response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestExecutionGraphReviewRequiresExplicitCurrentAttempt(t *testing.T) {
 	graph := executionGraphFixture()
 	graph.Tasks[0].State = domain.TaskReview
