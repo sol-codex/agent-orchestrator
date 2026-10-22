@@ -115,6 +115,7 @@ func TestExecutionCapacityUsesObservedInstallation(t *testing.T) {
 	items := agentsvc.Readiness{Agents: []domain.AgentReadinessSnapshot{
 		{ID: "codex", Installation: domain.AgentInstallationObservation{State: domain.AgentInstallationInstalled}, EffectiveReadiness: domain.AgentReadinessReady},
 		{ID: "grok", Installation: domain.AgentInstallationObservation{State: domain.AgentInstallationNotInstalled}, EffectiveReadiness: domain.AgentReadinessNotReady},
+		{ID: "claude-code", Installation: domain.AgentInstallationObservation{State: domain.AgentInstallationInstalled}, EffectiveReadiness: domain.AgentReadinessUnknown},
 	}}
 	agents, err := (executionCapacity{agents: executionReadinessFake{items: items}}).Available(context.Background(), "hub")
 	if err != nil || len(agents) != 1 || agents[0].ID != "codex" || agents[0].Slots != 4 {

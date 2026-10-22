@@ -133,7 +133,7 @@ func (c executionCapacity) Available(ctx context.Context, _ domain.ProjectID) ([
 	}
 	available := make([]execution.Agent, 0, len(readiness.Agents))
 	for _, item := range readiness.Agents {
-		if item.Installation.State != domain.AgentInstallationInstalled || item.EffectiveReadiness == domain.AgentReadinessNotReady {
+		if item.Installation.State != domain.AgentInstallationInstalled || item.EffectiveReadiness != domain.AgentReadinessReady {
 			continue
 		}
 		available = append(available, execution.Agent{ID: item.ID, Provider: item.ID,
