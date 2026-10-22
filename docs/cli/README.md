@@ -74,6 +74,7 @@ addresses change on restart.
 | `ao session cleanup`                | `POST /api/v1/sessions/cleanup`                |
 | `ao session claim-pr [<id>] <pr-ref>` | `POST /api/v1/sessions/{id}/pr/claim`        |
 | `ao orchestrator ls`                | `GET /api/v1/orchestrators`                    |
+| `ao coordinator claim/heartbeat/status/clear` | `PUT/GET/DELETE /api/v1/projects/{id}/external-coordinator` |
 | `ao send`                           | `POST /api/v1/sessions/{id}/send`              |
 | `ao report ...`                     | `POST /api/v1/reports`                         |
 | `ao preview [url]`                  | `POST /api/v1/sessions/{id}/preview`           |
@@ -129,6 +130,29 @@ pending for TUI adapters that cannot expose this semantic boundary.
 projection. Consumers such as Project Summary can read ordered report facts
 and outputs through it without claiming, acknowledging, waking, or interrupting
 delivery.
+
+### External project coordinator
+
+An agent coordinating from outside AO, such as a Codex Desktop chat, can
+register a project-scoped lease without creating an AO orchestrator session:
+
+```text
+ao coordinator claim --project <project-id> --owner <stable-owner-id> --name "Codex Desktop"
+ao coordinator heartbeat --project <project-id> --owner <stable-owner-id>
+ao coordinator status --project <project-id>
+ao coordinator clear --project <project-id> --owner <stable-owner-id>
+```
+
+The claim lasts five minutes. Heartbeat before it expires; the same owner can
+also repeat `claim`. The desktop project board shows the external coordinator
+while the lease is live and returns to its ordinary missing-orchestrator state
+after expiry. A different owner cannot claim or clear a live lease. Claiming
+conflicts with any nonterminated AO orchestrator session, and AO orchestrator
+creation conflicts with a live external lease. Clear the lease before moving
+coordination back into an AO orchestrator session. The registration changes
+project status only: it does not create a chat, forward worker reports to the
+external agent, or acknowledge reports. The external coordinator must inspect
+AO sessions and the read-only reports projection itself.
 
 If `--agent` / `--harness` is omitted, `ao spawn` uses the resolved project's
 `worker.agent` config. Before spawning, the CLI performs one targeted launch

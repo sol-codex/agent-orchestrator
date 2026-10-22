@@ -439,6 +439,13 @@ export type WorkspaceSummary = {
 	workspaceRepos?: WorkspaceRepoSummary[];
 	type?: "main" | "worktree";
 	orchestratorAgent?: AgentProvider;
+	/** Live AO registration for a coordinator outside this app's session model. */
+	externalCoordinator?: {
+		ownerId: string;
+		displayName: string;
+		lastSeenAt: string;
+		expiresAt: string;
+	};
 	accentColor?: string;
 	diff?: {
 		additions: number;
@@ -460,12 +467,18 @@ export function orchestratorNeedsRestart(workspace: WorkspaceSummary, orchestrat
 
 export type OrchestratorHealth =
 	| { state: "ok" }
+	| { state: "external"; message: string }
 	| { state: "restarting"; message: string }
 	| { state: "restart_needed"; message: string }
 	| { state: "missing"; message: string }
 	| { state: "duplicates"; message: string };
 
-export function orchestratorHealth(workspace: WorkspaceSummary, restarting = false): OrchestratorHealth {
+export function externalCoordinatorActive(workspace: Pick<WorkspaceSummary, "externalCoordinator">, now = Date.now()): boolean {
+	const expiresAt = workspace.externalCoordinator?.expiresAt;
+	return Boolean(expiresAt && Date.parse(expiresAt) > now);
+}
+
+export function orchestratorHealth(workspace: WorkspaceSummary, restarting = false, now = Date.now()): OrchestratorHealth {
 	if (restarting) {
 		return {
 			state: "restarting",
@@ -482,6 +495,12 @@ export function orchestratorHealth(workspace: WorkspaceSummary, restarting = fal
 	}
 	const orchestrator = newestActiveOrchestrator(workspace.sessions);
 	if (!orchestrator) {
+		if (externalCoordinatorActive(workspace, now)) {
+			return {
+				state: "external",
+				message: `${workspace.externalCoordinator!.displayName} is coordinating this project outside AO. AO orchestrator chat is not connected to that coordinator.`,
+			};
+		}
 		return { state: "missing", message: "No orchestrator is running for this project." };
 	}
 	if (orchestratorNeedsRestart(workspace, orchestrator)) {

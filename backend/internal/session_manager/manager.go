@@ -5730,6 +5730,14 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 			}
 			if ok {
 				cfg.OrchestratorSessionID = string(orchestratorID)
+			} else if reader, ok := m.store.(interface {
+				GetExternalCoordinator(context.Context, string) (domain.ExternalCoordinatorLease, bool, error)
+			}); ok {
+				lease, found, err := reader.GetExternalCoordinator(ctx, string(projectID))
+				if err != nil {
+					return "", fmt.Errorf("read external coordinator for worker prompt: %w", err)
+				}
+				cfg.ExternalCoordinator = found && lease.Active(m.clock())
 			}
 		}
 		rules, err := buildProjectRules(projectRulesConfig{

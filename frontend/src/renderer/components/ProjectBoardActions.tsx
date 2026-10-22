@@ -16,12 +16,14 @@ export function ProjectBoardActions({ actions, placement, quiet = false, cloud =
 	style?: CSSProperties;
 }) {
 	const { t } = useTranslation();
-	const { orchestrator, isSpawning, isProjectRestarting, isProvisioning, spawnError, canCreateAsTui,
+	const { orchestrator, externallyCoordinated, isSpawning, isProjectRestarting, isProvisioning, spawnError, canCreateAsTui,
 		openNewTask, openOrchestrator } = actions;
 	const header = placement === "header";
 	const busy = isSpawning || isProjectRestarting || isProvisioning;
 	const activity = orchestrator ? getAgentActivityView(orchestrator.activity, t).label : undefined;
-	const actionLabel = orchestrator ? t("shell.openOrchestrator") : t("shell.spawnOrchestrator");
+	const actionLabel = externallyCoordinated && !orchestrator
+		? t("shell.externalCoordinatorActive", { defaultValue: "Clear the external coordinator lease to start an AO orchestrator" })
+		: orchestrator ? t("shell.openOrchestrator") : t("shell.spawnOrchestrator");
 	const busyLabel = isProjectRestarting ? t("shell.restartingDots") : isProvisioning
 		? t("shell.provisioningDots", { defaultValue: "Setting up…" }) : isSpawning ? t("shell.spawningDots") : undefined;
 	const orchestratorButton = (
@@ -33,7 +35,7 @@ export function ProjectBoardActions({ actions, placement, quiet = false, cloud =
 						aria-busy={busy}
 						className={header ? "topbar-control--labeled" : undefined}
 						data-priority={header ? "secondary" : undefined}
-						disabled={busy}
+						disabled={busy || externallyCoordinated && !orchestrator}
 						onClick={() => openOrchestrator()}
 						variant={quiet ? "secondary" : "primary"}
 					>

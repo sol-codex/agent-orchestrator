@@ -4601,6 +4601,143 @@ paths:
       summary: Replace a project's per-project config
       tags:
       - projects
+  /api/v1/projects/{id}/external-coordinator:
+    delete:
+      operationId: clearExternalCoordinator
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Owner ID used to claim the lease.
+        in: query
+        name: ownerId
+        required: true
+        schema:
+          description: Owner ID used to claim the lease.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Clear the external coordinator lease held by ownerId
+      tags:
+      - projects
+    get:
+      operationId: getExternalCoordinator
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalCoordinatorResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Get the live external coordinator lease; this is not an AO orchestrator
+        session
+      tags:
+      - projects
+    put:
+      operationId: claimExternalCoordinator
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalCoordinatorClaim'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalCoordinatorResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Claim or renew a project-scoped external coordinator lease
+      tags:
+      - projects
   /api/v1/projects/{id}/permissions:
     delete:
       operationId: forgetProjectPermissions
@@ -17139,6 +17276,47 @@ components:
       required:
       - durationSeconds
       type: object
+    ExternalCoordinatorClaim:
+      properties:
+        displayName:
+          type: string
+        ownerId:
+          type: string
+      required:
+      - ownerId
+      - displayName
+      type: object
+    ExternalCoordinatorLease:
+      properties:
+        displayName:
+          type: string
+        expiresAt:
+          format: date-time
+          type: string
+        lastSeenAt:
+          format: date-time
+          type: string
+        ownerId:
+          type: string
+        projectId:
+          type: string
+      required:
+      - projectId
+      - ownerId
+      - displayName
+      - lastSeenAt
+      - expiresAt
+      type: object
+    ExternalCoordinatorResponse:
+      properties:
+        externalCoordinator:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/ExternalCoordinatorLease'
+            type: object
+      required:
+      - externalCoordinator
+      type: object
     FSEntry:
       properties:
         gitRepo:
@@ -18503,6 +18681,8 @@ components:
       type: object
     ProjectSummary:
       properties:
+        externalCoordinator:
+          $ref: '#/components/schemas/ExternalCoordinatorLease'
         folderMissing:
           type: boolean
         id:

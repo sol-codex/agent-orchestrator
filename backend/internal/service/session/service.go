@@ -340,6 +340,9 @@ func (s *Service) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		cfg.Async = true
 		unlock := s.lockOrchestratorProject(cfg.ProjectID)
 		defer unlock()
+		if err := s.rejectExternalCoordinator(ctx, cfg.ProjectID); err != nil {
+			return domain.Session{}, 0, 0, err
+		}
 
 		existing, err := s.activeOrchestrators(ctx, cfg.ProjectID)
 		if err != nil {
@@ -617,6 +620,9 @@ func (s *Service) SpawnOrchestrator(
 	defer cancelBudget()
 	unlock := s.lockOrchestratorProject(projectID)
 	defer unlock()
+	if err := s.rejectExternalCoordinator(ctx, projectID); err != nil {
+		return domain.Session{}, err
+	}
 
 	mode := requestedMode
 	if clean {
@@ -670,6 +676,23 @@ func (s *Service) SpawnOrchestrator(
 		return domain.Session{}, err
 	}
 	return sess, nil
+}
+
+func (s *Service) rejectExternalCoordinator(ctx context.Context, projectID domain.ProjectID) error {
+	reader, ok := s.store.(interface {
+		GetExternalCoordinator(context.Context, string) (domain.ExternalCoordinatorLease, bool, error)
+	})
+	if !ok {
+		return nil
+	}
+	lease, found, err := reader.GetExternalCoordinator(ctx, string(projectID))
+	if err != nil {
+		return apierr.Internal("EXTERNAL_COORDINATOR_READ_FAILED", "Failed to load external coordinator")
+	}
+	if found && lease.Active(s.clock()) {
+		return apierr.Conflict("EXTERNAL_COORDINATOR_ACTIVE", "Clear the external coordinator before starting an AO orchestrator", nil)
+	}
+	return nil
 }
 
 func (s *Service) activeOrchestrators(ctx context.Context, projectID domain.ProjectID) ([]domain.Session, error) {
