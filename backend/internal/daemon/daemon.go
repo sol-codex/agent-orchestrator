@@ -626,9 +626,17 @@ func Run(buildVersion string) error {
 		return errors.New("wire report delivery: session manager lacks semantic send support")
 	}
 	var reportCoordinator *reportsvc.Coordinator
+	var executionWakeMu sync.RWMutex
+	var executionWake func()
 	reportSvc := reportsvc.New(reportsvc.Deps{Store: store, Artifacts: chatSvc, OnCreated: func(domain.ReportRecord) {
 		if reportCoordinator != nil {
 			reportCoordinator.Wake()
+		}
+		executionWakeMu.RLock()
+		wake := executionWake
+		executionWakeMu.RUnlock()
+		if wake != nil {
+			wake()
 		}
 	}})
 	reportCoordinator = reportsvc.NewCoordinator(reportsvc.CoordinatorDeps{
@@ -849,6 +857,21 @@ func Run(buildVersion string) error {
 	agentSvc.WarmCodexAccounts()
 	automationSvc, automationDone := startAutomations(ctx, store, sessionSvc, log)
 	lcStack.automationDone = automationDone
+	// Existing sessions recover before execution attempts are inspected. Until
+	// that gate closes, the graph remains durable and the scheduler stays idle.
+	sessionRecoveryDone := make(chan struct{})
+	executionSvc, executionDone, executionErr := startExecution(ctx, sessionRecoveryDone, store, sessionSvc, agentSvc, log)
+	if executionErr != nil {
+		stop()
+		managedPreview.Close()
+		lcStack.Stop()
+		_ = cdcPipe.Stop()
+		return fmt.Errorf("start execution scheduler: %w", executionErr)
+	}
+	executionWakeMu.Lock()
+	executionWake = executionSvc.Wake
+	executionWakeMu.Unlock()
+	lcStack.executionDone = executionDone
 	autoReview := autoreview.New(store, reviewSvc, autoreview.Config{Logger: log})
 	lcStack.autoReviewDone = autoReview.Start(ctx)
 	// Push-device registry: persisted phones that receive OS push notifications.
@@ -974,6 +997,8 @@ func Run(buildVersion string) error {
 		Installer:          systemInstall,
 		Sessions:           sessionSvc,
 		Automations:        automationSvc,
+		ExecutionGraphs:    store,
+		ExecutionWake:      executionSvc.Wake,
 		DesktopWorkspaces:  sessionSvc,
 		PRs:                prActions,
 		Reviews:            reviewSvc,
@@ -1124,11 +1149,27 @@ func Run(buildVersion string) error {
 				log.Warn("reviewer chat recovery deferred", "err", reconcileErr)
 			}
 			close(reviewerChatsRecovered)
-			if reconcileErr := sessMgr.ReconcileBackground(ctx); reconcileErr != nil {
-				log.Error("background session reconciliation on boot failed", "err", reconcileErr)
-			}
-			if reconcileErr := lcStack.ReconcileRuntime(ctx); reconcileErr != nil {
-				log.Error("background agent-process reconciliation on boot failed", "err", reconcileErr)
+			for ctx.Err() == nil {
+				sessionRecoveryOK := true
+				if reconcileErr := sessMgr.ReconcileBackground(ctx); reconcileErr != nil {
+					log.Error("background session reconciliation deferred; retrying before execution dispatch", "err", reconcileErr)
+					sessionRecoveryOK = false
+				}
+				if reconcileErr := lcStack.ReconcileRuntime(ctx); reconcileErr != nil {
+					log.Error("background agent-process reconciliation deferred; retrying before execution dispatch", "err", reconcileErr)
+					sessionRecoveryOK = false
+				}
+				if sessionRecoveryOK {
+					close(sessionRecoveryDone)
+					return
+				}
+				timer := time.NewTimer(30 * time.Second)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				}
 			}
 		}()
 		go func() {

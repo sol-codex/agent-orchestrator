@@ -2082,6 +2082,37 @@ type AutomationIDParam struct {
 	AutomationID string `path:"automationId" description:"Automation identifier."`
 }
 
+// ExecutionGraphIDParam identifies an approved execution graph.
+type ExecutionGraphIDParam struct {
+	GraphID string `path:"graphId" description:"Stable execution graph identifier."`
+}
+
+// ExecutionTaskIDParam identifies one task within an execution graph.
+type ExecutionTaskIDParam struct {
+	TaskID string `path:"taskId" description:"Stable task identifier."`
+}
+
+// ExecutionGraphRequest is the exact versioned graph imported or revised by a
+// coordinator. Domain validation remains the authoritative contract.
+type ExecutionGraphRequest = domain.ExecutionGraph
+
+// ExecutionGraphEnvelope wraps one persisted graph.
+type ExecutionGraphEnvelope struct {
+	Graph domain.ExecutionGraph `json:"graph"`
+}
+
+// ListExecutionGraphsResponse contains active project execution graphs.
+type ListExecutionGraphsResponse struct {
+	Graphs []domain.ExecutionGraph `json:"graphs"`
+}
+
+// ReviewExecutionTaskRequest records an explicit acceptance decision for one
+// finished worker attempt. The current task must be awaiting review.
+type ReviewExecutionTaskRequest struct {
+	AttemptID string `json:"attemptId"`
+	Decision  string `json:"decision" enum:"accept,revise,reject"`
+}
+
 // ListAutomationsQuery describes filters and pagination for automation definitions.
 type ListAutomationsQuery struct {
 	ProjectID string `query:"projectId,omitempty"`

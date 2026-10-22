@@ -70,6 +70,8 @@ func Build() ([]byte, error) {
 			"Agent session lifecycle and messaging"),
 		*(&openapi31.Tag{Name: "automations"}).WithDescription(
 			"Recurring daemon-owned session schedules and durable run history"),
+		*(&openapi31.Tag{Name: "execution-graphs"}).WithDescription(
+			"Versioned project plans, task execution state, and explicit review decisions"),
 		*(&openapi31.Tag{Name: "prs"}).WithDescription(
 			"Pull-request actions (SCM lane)"),
 		*(&openapi31.Tag{Name: "reviews"}).WithDescription(
@@ -305,6 +307,11 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersListAutomationsResponse":                   "ListAutomationsResponse",
 	"ControllersAutomationRunResponse":                     "AutomationRunResponse",
 	"ControllersListAutomationRunsResponse":                "ListAutomationRunsResponse",
+	"ControllersExecutionGraphIDParam":                     "ExecutionGraphIDParam",
+	"ControllersExecutionTaskIDParam":                      "ExecutionTaskIDParam",
+	"ControllersExecutionGraphEnvelope":                    "ExecutionGraphEnvelope",
+	"ControllersListExecutionGraphsResponse":               "ListExecutionGraphsResponse",
+	"ControllersReviewExecutionTaskRequest":                "ReviewExecutionTaskRequest",
 	// httpd/envelope
 	"EnvelopeAPIError": "APIError",
 	// observe/ownership
@@ -323,6 +330,12 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersTriggerReviewRequest": "TriggerReviewRequest",
 	"DomainContainerReapConfig":       "ContainerReapConfig",
 	"DomainAgentConfig":               "AgentConfig",
+	"DomainExecutionGraph":            "ExecutionGraph",
+	"DomainExecutionSlice":            "ExecutionSlice",
+	"DomainExecutionTask":             "ExecutionTask",
+	"DomainTaskAssignment":            "TaskAssignment",
+	"DomainTaskAttempt":               "TaskAttempt",
+	"DomainTaskState":                 "TaskState",
 	"DomainRoleOverride":              "RoleOverride",
 	// httpd/controllers (wire envelopes)
 	"ControllersListProjectsResponse":                     "ListProjectsResponse",
@@ -734,6 +747,7 @@ func operations() []operation {
 	ops = append(ops, projectOperations()...)
 	ops = append(ops, sessionOperations()...)
 	ops = append(ops, automationOperations()...)
+	ops = append(ops, executionGraphOperations()...)
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, notificationOperations()...)
@@ -772,6 +786,28 @@ func automationOperations() []operation {
 		{method: http.MethodPatch, path: "/api/v1/automations/{automationId}", id: "updateAutomation", tag: "automations", summary: "Update a recurring automation", pathParams: id, reqBody: controllers.UpdateAutomationRequest{}, resps: append([]respUnit{{http.StatusOK, controllers.AutomationEnvelope{}}}, commonErrors...)},
 		{method: http.MethodDelete, path: "/api/v1/automations/{automationId}", id: "deleteAutomation", tag: "automations", summary: "Delete an automation and its run history", pathParams: id, resps: append([]respUnit{{http.StatusNoContent, nil}}, commonErrors...)},
 		{method: http.MethodGet, path: "/api/v1/automations/{automationId}/runs", id: "listAutomationRuns", tag: "automations", summary: "List durable automation run history", pathParams: []any{controllers.AutomationIDParam{}, controllers.ListAutomationRunsQuery{}}, resps: append([]respUnit{{http.StatusOK, controllers.ListAutomationRunsResponse{}}}, commonErrors...)},
+	}
+}
+
+func executionGraphOperations() []operation {
+	id := []any{controllers.ExecutionGraphIDParam{}}
+	taskID := []any{controllers.ExecutionGraphIDParam{}, controllers.ExecutionTaskIDParam{}}
+	commonErrors := []respUnit{
+		{http.StatusBadRequest, envelope.APIError{}},
+		{http.StatusNotFound, envelope.APIError{}},
+		{http.StatusConflict, envelope.APIError{}},
+		{http.StatusInternalServerError, envelope.APIError{}},
+		{http.StatusNotImplemented, envelope.APIError{}},
+	}
+	return []operation{
+		{method: http.MethodGet, path: "/api/v1/execution-graphs", id: "listExecutionGraphs", tag: "execution-graphs", summary: "List active execution graphs", resps: append([]respUnit{{http.StatusOK, controllers.ListExecutionGraphsResponse{}}}, commonErrors...)},
+		{method: http.MethodPost, path: "/api/v1/execution-graphs", id: "createExecutionGraph", tag: "execution-graphs", summary: "Import and activate a versioned execution graph", reqBody: controllers.ExecutionGraphRequest{}, resps: append([]respUnit{{http.StatusCreated, controllers.ExecutionGraphEnvelope{}}}, commonErrors...)},
+		{method: http.MethodGet, path: "/api/v1/execution-graphs/{graphId}", id: "getExecutionGraph", tag: "execution-graphs", summary: "Get an execution graph", pathParams: id, resps: append([]respUnit{{http.StatusOK, controllers.ExecutionGraphEnvelope{}}}, commonErrors...)},
+		{method: http.MethodPut, path: "/api/v1/execution-graphs/{graphId}", id: "updateExecutionGraph", tag: "execution-graphs", summary: "Save the next graph revision", pathParams: id, reqBody: controllers.ExecutionGraphRequest{}, resps: append([]respUnit{{http.StatusOK, controllers.ExecutionGraphEnvelope{}}}, commonErrors...)},
+		{method: http.MethodPost, path: "/api/v1/execution-graphs/{graphId}/reconcile", id: "reconcileExecutionGraph", tag: "execution-graphs", summary: "Wake execution-graph reconciliation", pathParams: id, resps: append([]respUnit{{http.StatusAccepted, nil}}, commonErrors...)},
+		{method: http.MethodPost, path: "/api/v1/execution-graphs/{graphId}/tasks/{taskId}/review", id: "reviewExecutionTask", tag: "execution-graphs", summary: "Accept, revise, or reject a task in review", pathParams: taskID, reqBody: controllers.ReviewExecutionTaskRequest{}, resps: append([]respUnit{{http.StatusNoContent, nil}}, commonErrors...)},
+		{method: http.MethodPost, path: "/api/v1/execution-graphs/{graphId}/tasks/{taskId}/unblock", id: "unblockExecutionTask", tag: "execution-graphs", summary: "Release a blocked task after its dependencies are complete", pathParams: taskID, resps: append([]respUnit{{http.StatusNoContent, nil}}, commonErrors...)},
+		{method: http.MethodPost, path: "/api/v1/execution-graphs/{graphId}/tasks/{taskId}/cancel", id: "cancelExecutionTask", tag: "execution-graphs", summary: "Cancel an unassigned unfinished task", pathParams: taskID, resps: append([]respUnit{{http.StatusNoContent, nil}}, commonErrors...)},
 	}
 }
 
