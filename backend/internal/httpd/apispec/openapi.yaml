@@ -2874,6 +2874,419 @@ paths:
       summary: Stream CDC events with durable replay
       tags:
       - events
+  /api/v1/execution-graphs:
+    get:
+      operationId: listExecutionGraphs
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListExecutionGraphsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List active execution graphs
+      tags:
+      - execution-graphs
+    post:
+      operationId: createExecutionGraph
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionGraph'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionGraphEnvelope'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Import and activate a versioned execution graph
+      tags:
+      - execution-graphs
+  /api/v1/execution-graphs/{graphId}:
+    get:
+      operationId: getExecutionGraph
+      parameters:
+      - description: Stable execution graph identifier.
+        in: path
+        name: graphId
+        required: true
+        schema:
+          description: Stable execution graph identifier.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionGraphEnvelope'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Get an execution graph
+      tags:
+      - execution-graphs
+    put:
+      operationId: updateExecutionGraph
+      parameters:
+      - description: Stable execution graph identifier.
+        in: path
+        name: graphId
+        required: true
+        schema:
+          description: Stable execution graph identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionGraph'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionGraphEnvelope'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Save the next graph revision
+      tags:
+      - execution-graphs
+  /api/v1/execution-graphs/{graphId}/reconcile:
+    post:
+      operationId: reconcileExecutionGraph
+      parameters:
+      - description: Stable execution graph identifier.
+        in: path
+        name: graphId
+        required: true
+        schema:
+          description: Stable execution graph identifier.
+          type: string
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Wake execution-graph reconciliation
+      tags:
+      - execution-graphs
+  /api/v1/execution-graphs/{graphId}/tasks/{taskId}/cancel:
+    post:
+      operationId: cancelExecutionTask
+      parameters:
+      - description: Stable execution graph identifier.
+        in: path
+        name: graphId
+        required: true
+        schema:
+          description: Stable execution graph identifier.
+          type: string
+      - description: Stable task identifier.
+        in: path
+        name: taskId
+        required: true
+        schema:
+          description: Stable task identifier.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Cancel an unassigned unfinished task
+      tags:
+      - execution-graphs
+  /api/v1/execution-graphs/{graphId}/tasks/{taskId}/review:
+    post:
+      operationId: reviewExecutionTask
+      parameters:
+      - description: Stable execution graph identifier.
+        in: path
+        name: graphId
+        required: true
+        schema:
+          description: Stable execution graph identifier.
+          type: string
+      - description: Stable task identifier.
+        in: path
+        name: taskId
+        required: true
+        schema:
+          description: Stable task identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewExecutionTaskRequest'
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Accept, revise, or reject a task in review
+      tags:
+      - execution-graphs
+  /api/v1/execution-graphs/{graphId}/tasks/{taskId}/unblock:
+    post:
+      operationId: unblockExecutionTask
+      parameters:
+      - description: Stable execution graph identifier.
+        in: path
+        name: graphId
+        required: true
+        schema:
+          description: Stable execution graph identifier.
+          type: string
+      - description: Stable task identifier.
+        in: path
+        name: taskId
+        required: true
+        schema:
+          description: Stable task identifier.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Release a blocked task after its dependencies are complete
+      tags:
+      - execution-graphs
   /api/v1/fs/dirs:
     get:
       operationId: listDirs
@@ -16568,6 +16981,144 @@ components:
       - coverage
       - providerAttribution
       type: object
+    ExecutionGraph:
+      properties:
+        id:
+          type: string
+        objective:
+          type: string
+        projectId:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        schemaVersion:
+          type: integer
+        slices:
+          items:
+            $ref: '#/components/schemas/ExecutionSlice'
+          type: array
+        tasks:
+          items:
+            $ref: '#/components/schemas/ExecutionTask'
+          type: array
+      required:
+      - schemaVersion
+      - id
+      - revision
+      - projectId
+      - objective
+      - slices
+      - tasks
+      type: object
+    ExecutionGraphEnvelope:
+      properties:
+        graph:
+          $ref: '#/components/schemas/ExecutionGraph'
+      required:
+      - graph
+      type: object
+    ExecutionSlice:
+      properties:
+        acceptanceCriteria:
+          items:
+            type: string
+          type: array
+        deliverables:
+          items:
+            type: string
+          type: array
+        id:
+          type: string
+        objective:
+          type: string
+        scope:
+          type: string
+      required:
+      - id
+      - objective
+      - scope
+      - deliverables
+      - acceptanceCriteria
+      type: object
+    ExecutionTask:
+      properties:
+        acceptanceCriteria:
+          items:
+            type: string
+          type: array
+        assignment:
+          $ref: '#/components/schemas/TaskAssignment'
+        attempts:
+          items:
+            $ref: '#/components/schemas/TaskAttempt'
+          type: array
+        complexity:
+          type: string
+        deliverables:
+          items:
+            type: string
+          type: array
+        dependencies:
+          items:
+            type: string
+          type: array
+        fallbackAgents:
+          items:
+            type: string
+          type: array
+        id:
+          type: string
+        integrationRequirements:
+          items:
+            type: string
+          type: array
+        objective:
+          type: string
+        preferredAgent:
+          type: string
+        priority:
+          type: integer
+        recommendedCapabilities:
+          items:
+            type: string
+          type: array
+        resources:
+          items:
+            type: string
+          type: array
+        scope:
+          type: string
+        sliceId:
+          type: string
+        softDependencies:
+          items:
+            type: string
+          type: array
+        state:
+          type: string
+        validationProcedures:
+          items:
+            type: string
+          type: array
+      required:
+      - id
+      - sliceId
+      - objective
+      - scope
+      - deliverables
+      - acceptanceCriteria
+      - dependencies
+      - priority
+      - recommendedCapabilities
+      - fallbackAgents
+      - resources
+      - integrationRequirements
+      - validationProcedures
+      - complexity
+      - state
+      - attempts
+      type: object
     ExitAgentResponse:
       properties:
         ok:
@@ -17150,6 +17701,15 @@ components:
       - path
       - parent
       - entries
+      type: object
+    ListExecutionGraphsResponse:
+      properties:
+        graphs:
+          items:
+            $ref: '#/components/schemas/ExecutionGraph'
+          type: array
+      required:
+      - graphs
       type: object
     ListNotificationsResponse:
       properties:
@@ -18465,6 +19025,20 @@ components:
           type: string
         turnId:
           type: string
+      type: object
+    ReviewExecutionTaskRequest:
+      properties:
+        attemptId:
+          type: string
+        decision:
+          enum:
+          - accept
+          - revise
+          - reject
+          type: string
+      required:
+      - attemptId
+      - decision
       type: object
     ReviewRun:
       properties:
@@ -20731,6 +21305,53 @@ components:
       - ready
       - requirements
       type: object
+    TaskAssignment:
+      properties:
+        agentId:
+          type: string
+        assignedAt:
+          format: date-time
+          type: string
+        attemptId:
+          type: string
+        provider:
+          type: string
+        sessionId:
+          type:
+          - "null"
+          - string
+      required:
+      - agentId
+      - attemptId
+      - assignedAt
+      type: object
+    TaskAttempt:
+      properties:
+        agentId:
+          type: string
+        error:
+          type: string
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        id:
+          type: string
+        retryable:
+          type: boolean
+        sessionId:
+          type:
+          - "null"
+          - string
+        startedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - agentId
+      - startedAt
+      type: object
     TelemetryIdentityResponse:
       properties:
         cloudUserId:
@@ -21844,6 +22465,9 @@ tags:
   name: sessions
 - description: Recurring daemon-owned session schedules and durable run history
   name: automations
+- description: Versioned project plans, task execution state, and explicit review
+    decisions
+  name: execution-graphs
 - description: Pull-request actions (SCM lane)
   name: prs
 - description: Code-review runs and findings
