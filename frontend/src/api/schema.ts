@@ -5782,6 +5782,16 @@ export interface components {
             selection: string;
             sourceRole: string;
         };
+        DomainTaskReviewRecord: {
+            attemptId: string;
+            decision: string;
+            evidenceRefs?: string[];
+            prUrl?: string;
+            /** Format: date-time */
+            reviewedAt: string;
+            sourceHead?: string;
+            validationSummary?: string;
+        };
         EditConversationMessageRequest: {
             clientMessageId?: string;
             text: string;
@@ -5870,6 +5880,7 @@ export interface components {
             priority: number;
             recommendedCapabilities: string[];
             resources: string[];
+            reviews?: components["schemas"]["DomainTaskReviewRecord"][];
             scope: string;
             sliceId: string;
             softDependencies?: string[];
@@ -6640,6 +6651,10 @@ export interface components {
             attemptId: string;
             /** @enum {string} */
             decision: "accept" | "revise" | "reject";
+            evidenceRefs?: string[];
+            prUrl?: string;
+            sourceHead?: string;
+            validationSummary?: string;
         };
         ReviewRun: {
             autoInjectReview: boolean;
