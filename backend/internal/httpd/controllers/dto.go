@@ -170,6 +170,15 @@ type ListProjectsResponse struct {
 	Projects []projectsvc.Summary `json:"projects"`
 }
 
+// ExternalCoordinatorResponse reports a live external lease, if any.
+type ExternalCoordinatorResponse struct {
+	ExternalCoordinator *domain.ExternalCoordinatorLease `json:"externalCoordinator"`
+}
+
+type ExternalCoordinatorClearQuery struct {
+	OwnerID string `query:"ownerId" required:"true" description:"Owner ID used to claim the lease."`
+}
+
 // ProjectResponse is the { project } body shared by POST /projects (201).
 type ProjectResponse struct {
 	Project projectsvc.Project `json:"project"`

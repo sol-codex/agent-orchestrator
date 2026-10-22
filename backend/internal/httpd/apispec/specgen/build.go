@@ -326,6 +326,9 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"DomainRoleOverride":              "RoleOverride",
 	// httpd/controllers (wire envelopes)
 	"ControllersListProjectsResponse":                     "ListProjectsResponse",
+	"ControllersExternalCoordinatorResponse":              "ExternalCoordinatorResponse",
+	"ControllersExternalCoordinatorClearQuery":            "ExternalCoordinatorClearQuery",
+	"DomainExternalCoordinatorLease":                      "ExternalCoordinatorLease",
 	"ControllersProjectResponse":                          "ProjectResponse",
 	"ControllersAgentIDParam":                             "AgentIDParam",
 	"ControllersCodexAccountIDParam":                      "CodexAccountIDParam",
@@ -618,6 +621,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	// service/project entities + DTOs
 	"ProjectProject":                    "Project",
 	"ProjectSummary":                    "ProjectSummary",
+	"ProjectExternalCoordinatorClaim":   "ExternalCoordinatorClaim",
 	"ProjectDegraded":                   "DegradedProject",
 	"ProjectAddInput":                   "AddProjectInput",
 	"ProjectCloneInput":                 "CloneProjectInput",
@@ -2706,6 +2710,42 @@ func projectOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.ProjectResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/external-coordinator", id: "getExternalCoordinator", tag: "projects",
+			summary:    "Get the live external coordinator lease; this is not an AO orchestrator session",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ExternalCoordinatorResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/projects/{id}/external-coordinator", id: "claimExternalCoordinator", tag: "projects",
+			summary:    "Claim or renew a project-scoped external coordinator lease",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			reqBody:    projectsvc.ExternalCoordinatorClaim{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ExternalCoordinatorResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/projects/{id}/external-coordinator", id: "clearExternalCoordinator", tag: "projects",
+			summary:    "Clear the external coordinator lease held by ownerId",
+			pathParams: []any{controllers.ProjectIDParam{}, controllers.ExternalCoordinatorClearQuery{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

@@ -5,6 +5,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -34,9 +35,70 @@ func (c *ProjectsController) Register(r chi.Router) {
 	r.Get("/projects/{id}", c.get)
 	r.Put("/projects/{id}", c.updateSettings)
 	r.Put("/projects/{id}/config", c.setConfig)
+	r.Get("/projects/{id}/external-coordinator", c.getExternalCoordinator)
+	r.Put("/projects/{id}/external-coordinator", c.claimExternalCoordinator)
+	r.Delete("/projects/{id}/external-coordinator", c.clearExternalCoordinator)
 	r.Patch("/projects/{id}/permissions", c.setPermissions)
 	r.Delete("/projects/{id}/permissions", c.forgetPermissions)
 	r.Delete("/projects/{id}", c.remove)
+}
+
+type externalCoordinatorManager interface {
+	GetExternalCoordinator(context.Context, domain.ProjectID) (*domain.ExternalCoordinatorLease, error)
+	ClaimExternalCoordinator(context.Context, domain.ProjectID, projectsvc.ExternalCoordinatorClaim) (domain.ExternalCoordinatorLease, error)
+	ClearExternalCoordinator(context.Context, domain.ProjectID, string) error
+}
+
+func (c *ProjectsController) externalCoordinatorManager(w http.ResponseWriter, r *http.Request, method string) externalCoordinatorManager {
+	mgr, ok := c.Mgr.(externalCoordinatorManager)
+	if !ok {
+		apispec.NotImplemented(w, r, method, "/api/v1/projects/{id}/external-coordinator")
+		return nil
+	}
+	return mgr
+}
+
+func (c *ProjectsController) getExternalCoordinator(w http.ResponseWriter, r *http.Request) {
+	mgr := c.externalCoordinatorManager(w, r, http.MethodGet)
+	if mgr == nil {
+		return
+	}
+	lease, err := mgr.GetExternalCoordinator(r.Context(), projectID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ExternalCoordinatorResponse{ExternalCoordinator: lease})
+}
+
+func (c *ProjectsController) claimExternalCoordinator(w http.ResponseWriter, r *http.Request) {
+	mgr := c.externalCoordinatorManager(w, r, http.MethodPut)
+	if mgr == nil {
+		return
+	}
+	var in projectsvc.ExternalCoordinatorClaim
+	if err := decodeJSONStrict(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	lease, err := mgr.ClaimExternalCoordinator(r.Context(), projectID(r), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ExternalCoordinatorResponse{ExternalCoordinator: &lease})
+}
+
+func (c *ProjectsController) clearExternalCoordinator(w http.ResponseWriter, r *http.Request) {
+	mgr := c.externalCoordinatorManager(w, r, http.MethodDelete)
+	if mgr == nil {
+		return
+	}
+	if err := mgr.ClearExternalCoordinator(r.Context(), projectID(r), r.URL.Query().Get("ownerId")); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (c *ProjectsController) checkCloneDestination(w http.ResponseWriter, r *http.Request) {

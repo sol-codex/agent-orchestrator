@@ -211,6 +211,30 @@ func TestBuildSystemPrompt_WorkerWithOrchestratorUsesOrchestratorParallelHandoff
 	}
 }
 
+func TestBuildSystemPrompt_WorkerWithExternalCoordinatorReportsParallelHelp(t *testing.T) {
+	got := buildSystemPromptText(systemPromptConfig{
+		Role:                sessionPromptRoleWorker,
+		Project:             promptProject{ID: "mer", Name: "Mercury"},
+		ExternalCoordinator: true,
+	})
+	for _, want := range []string{
+		"## External Coordinator",
+		"A coordinator outside AO is registered for this project",
+		"ao report --needs-input --note <request>",
+		"GET /api/v1/reports?projectId=<id>",
+		"AO does not automatically deliver those reports outside the app",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("worker prompt missing %q:\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{"If no orchestrator is attached, continue serially", "ao send --session"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("external coordinator prompt included misleading AO-session guidance %q", forbidden)
+		}
+	}
+}
+
 func TestBuildSystemPrompt_WorkerRequiresDurableReports(t *testing.T) {
 	got := buildSystemPromptText(systemPromptConfig{
 		Role:                  sessionPromptRoleWorker,

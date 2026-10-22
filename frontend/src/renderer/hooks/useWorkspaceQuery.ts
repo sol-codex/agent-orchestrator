@@ -288,6 +288,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 			path: project.path,
 			folderMissing: project.folderMissing,
 			orchestratorAgent: project.orchestratorAgent ? toAgentProvider(project.orchestratorAgent) : undefined,
+			externalCoordinator: project.externalCoordinator ?? undefined,
 			sessions: sessions
 				.filter((session) => session.projectId === project.id)
 				.map((session) => toWorkspaceSession(session, project)),
@@ -348,6 +349,7 @@ function toRemoteWorkspaces(
 		path: project.path,
 		folderMissing: project.folderMissing,
 		orchestratorAgent: project.orchestratorAgent ? toAgentProvider(project.orchestratorAgent) : undefined,
+		externalCoordinator: project.externalCoordinator ?? undefined,
 		sessions: sessions.filter((session) => session.projectId === project.id).map((session) => ({
 			...toWorkspaceSession(session, project),
 			hostId,
@@ -828,7 +830,7 @@ export function useRemoteSessionProjectKind(sessionId: string, hostId?: string):
 }
 
 export type WorkspaceScope = {
-	project?: Pick<WorkspaceSummary, "id" | "kind" | "name" | "orchestratorAgent">;
+	project?: Pick<WorkspaceSummary, "id" | "kind" | "name" | "orchestratorAgent" | "externalCoordinator">;
 	hasWorkerSessions: boolean;
 	session?: WorkspaceSession;
 	orchestrator?: WorkspaceSession;
@@ -853,6 +855,7 @@ function selectWorkspaceScope(
 				kind: workspace.kind,
 				name: workspace.name,
 				orchestratorAgent: workspace.orchestratorAgent,
+				externalCoordinator: workspace.externalCoordinator,
 			}
 		: undefined;
 	return {

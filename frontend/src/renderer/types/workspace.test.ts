@@ -250,6 +250,22 @@ describe("sessionNeedsAttention", () => {
 });
 
 describe("orchestratorHealth", () => {
+	it("shows a live external coordinator without implying an AO chat exists, then expires", () => {
+		const now = Date.parse("2026-10-22T12:00:00Z");
+		const workspace: WorkspaceSummary = {
+			id: "skills", name: "skills", path: "/tmp/skills", sessions: [],
+			externalCoordinator: {
+				ownerId: "codex-desktop", displayName: "Codex Desktop",
+				lastSeenAt: "2026-10-22T11:59:00Z", expiresAt: "2026-10-22T12:04:00Z",
+			},
+		};
+		expect(orchestratorHealth(workspace, false, now)).toEqual({
+			state: "external",
+			message: "Codex Desktop is coordinating this project outside AO. AO orchestrator chat is not connected to that coordinator.",
+		});
+		expect(orchestratorHealth(workspace, false, now + 5 * 60_000).state).toBe("missing");
+	});
+
 	it("reports restart_needed when the configured orchestrator agent differs from the newest active orchestrator", () => {
 		const older = sessionWith({
 			id: "skills-1",
