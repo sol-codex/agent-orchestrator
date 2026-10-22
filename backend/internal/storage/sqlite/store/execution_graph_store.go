@@ -60,7 +60,7 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 				return err
 			}
 			for _, task := range graph.Tasks {
-				if task.Assignment != nil || len(task.Attempts) != 0 || runtimeState(task.State) {
+				if task.Assignment != nil || len(task.Attempts) != 0 || len(task.Reviews) != 0 || runtimeState(task.State) {
 					return fmt.Errorf("%w: graph %q imported task %q", execution.ErrGraphRuntimeFacts, graph.ID, task.ID)
 				}
 			}
@@ -94,13 +94,13 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 				if (prior.State == domain.TaskAssigned || prior.State == domain.TaskRunning || prior.State == domain.TaskReview) && !reflect.DeepEqual(prior, task) {
 					return fmt.Errorf("%w: graph %q active task %q contract is frozen", execution.ErrGraphRuntimeFacts, graph.ID, task.ID)
 				}
-				if prior.State != task.State || !reflect.DeepEqual(prior.Assignment, task.Assignment) || !reflect.DeepEqual(prior.Attempts, task.Attempts) {
+				if prior.State != task.State || !reflect.DeepEqual(prior.Assignment, task.Assignment) || !reflect.DeepEqual(prior.Attempts, task.Attempts) || !reflect.DeepEqual(prior.Reviews, task.Reviews) {
 					return fmt.Errorf("%w: graph %q task %q", execution.ErrGraphRuntimeFacts, graph.ID, task.ID)
 				}
 				if prior.Assignment != nil && !reflect.DeepEqual(prior.Resources, task.Resources) {
 					return fmt.Errorf("%w: graph %q task %q claimed resources cannot change", execution.ErrGraphRuntimeFacts, graph.ID, task.ID)
 				}
-			} else if task.Assignment != nil || len(task.Attempts) != 0 || runtimeState(task.State) {
+			} else if task.Assignment != nil || len(task.Attempts) != 0 || len(task.Reviews) != 0 || runtimeState(task.State) {
 				return fmt.Errorf("%w: graph %q new task %q", execution.ErrGraphRuntimeFacts, graph.ID, task.ID)
 			}
 		}
@@ -421,8 +421,17 @@ func (s *Store) MarkReview(ctx context.Context, graphID, taskID, attemptID strin
 }
 
 func (s *Store) ResolveReview(ctx context.Context, graphID, taskID, attemptID string, decision execution.ReviewDecision, at time.Time) (bool, error) {
+	return s.ResolveReviewWithEvidence(ctx, graphID, taskID, attemptID, decision, domain.TaskReviewRecord{}, at)
+}
+
+// ResolveReviewWithEvidence atomically finishes the fenced attempt and appends
+// the coordinator's review record to the durable graph snapshot.
+func (s *Store) ResolveReviewWithEvidence(ctx context.Context, graphID, taskID, attemptID string, decision execution.ReviewDecision, evidence domain.TaskReviewRecord, at time.Time) (bool, error) {
 	if decision != execution.ReviewAccept && decision != execution.ReviewRevise && decision != execution.ReviewReject {
 		return false, execution.ErrInvalidDecision
+	}
+	if err := domain.ValidateTaskReviewEvidence(evidence); err != nil {
+		return false, err
 	}
 	return s.mutateExecutionGraph(ctx, graphID, at, func(graph *domain.ExecutionGraph, db gen.DBTX) (bool, error) {
 		i := taskIndex(graph, taskID)
@@ -444,7 +453,16 @@ func (s *Store) ResolveReview(ctx context.Context, graphID, taskID, attemptID st
 		case execution.ReviewReject:
 			task.State = domain.TaskFailed
 		}
-		return finishAttempt(ctx, db, task, attemptID, at, decision == execution.ReviewRevise, "")
+		changed, err := finishAttempt(ctx, db, task, attemptID, at, decision == execution.ReviewRevise, "")
+		if err != nil || !changed {
+			return changed, err
+		}
+		task.Reviews = append(task.Reviews, domain.TaskReviewRecord{
+			AttemptID: attemptID, Decision: string(decision), ReviewedAt: at.UTC(),
+			SourceHead: evidence.SourceHead, PRURL: evidence.PRURL,
+			ValidationSummary: evidence.ValidationSummary, EvidenceRefs: evidence.EvidenceRefs,
+		})
+		return true, nil
 	})
 }
 

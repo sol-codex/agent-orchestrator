@@ -30,6 +30,7 @@ type fakeExecutionGraphStore struct {
 	readyCalls  int
 	cancelCalls int
 	reviewed    execution.ReviewDecision
+	evidence    domain.TaskReviewRecord
 }
 
 func (f *fakeExecutionGraphStore) SaveExecutionGraph(_ context.Context, graph domain.ExecutionGraph) error {
@@ -64,8 +65,13 @@ func (f *fakeExecutionGraphStore) ListActiveGraphs(context.Context) ([]domain.Ex
 }
 
 func (f *fakeExecutionGraphStore) ResolveReview(_ context.Context, graphID, taskID, attemptID string, decision execution.ReviewDecision, _ time.Time) (bool, error) {
+	return f.ResolveReviewWithEvidence(context.Background(), graphID, taskID, attemptID, decision, domain.TaskReviewRecord{}, time.Time{})
+}
+
+func (f *fakeExecutionGraphStore) ResolveReviewWithEvidence(_ context.Context, graphID, taskID, attemptID string, decision execution.ReviewDecision, evidence domain.TaskReviewRecord, _ time.Time) (bool, error) {
 	f.reviewCalls++
 	f.reviewed = decision
+	f.evidence = evidence
 	if f.reviewErr != nil {
 		return false, f.reviewErr
 	}
@@ -369,6 +375,37 @@ func TestExecutionGraphReviewRequiresExplicitCurrentAttempt(t *testing.T) {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestExecutionGraphReviewCarriesBoundedEvidence(t *testing.T) {
+	graph := executionGraphFixture()
+	graph.Tasks[0].State = domain.TaskReview
+	graph.Tasks[0].Assignment = &domain.TaskAssignment{AgentID: "codex", AttemptID: "attempt-1"}
+	graph.Tasks[0].Attempts = []domain.TaskAttempt{{ID: "attempt-1", AgentID: "codex"}}
+	store := &fakeExecutionGraphStore{graphs: map[string]domain.ExecutionGraph{graph.ID: graph}}
+	router := executionGraphTestRouter(store, nil)
+	path := "/execution-graphs/plan-1/tasks/task-1/review"
+	req := ReviewExecutionTaskRequest{
+		AttemptID: "attempt-1", Decision: "accept",
+		SourceHead:        "0123456789abcdef0123456789abcdef01234567",
+		PRURL:             "https://github.com/sol-codex/agent-orchestrator/pull/4",
+		ValidationSummary: "Independent focused tests passed.",
+		EvidenceRefs:      []string{"https://github.com/sol-codex/agent-orchestrator/actions/runs/1"},
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, requestJSON(t, http.MethodPost, path, req))
+	if rec.Code != http.StatusNoContent || store.evidence.SourceHead != req.SourceHead ||
+		store.evidence.PRURL != req.PRURL || store.evidence.ValidationSummary != req.ValidationSummary ||
+		len(store.evidence.EvidenceRefs) != 1 {
+		t.Fatalf("review evidence status=%d evidence=%+v", rec.Code, store.evidence)
+	}
+	store.graphs[graph.ID] = graph
+	req.SourceHead = "short"
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, requestJSON(t, http.MethodPost, path, req))
+	if rec.Code != http.StatusBadRequest || store.reviewCalls != 1 {
+		t.Fatalf("invalid evidence status=%d calls=%d", rec.Code, store.reviewCalls)
 	}
 }
 

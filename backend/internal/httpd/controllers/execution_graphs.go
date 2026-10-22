@@ -25,6 +25,7 @@ type ExecutionGraphStore interface {
 	GetExecutionGraph(context.Context, string) (domain.ExecutionGraph, bool, error)
 	ListActiveGraphs(context.Context) ([]domain.ExecutionGraph, error)
 	ResolveReview(context.Context, string, string, string, execution.ReviewDecision, time.Time) (bool, error)
+	ResolveReviewWithEvidence(context.Context, string, string, string, execution.ReviewDecision, domain.TaskReviewRecord, time.Time) (bool, error)
 	MarkReady(context.Context, string, string, time.Time) (bool, error)
 	CancelTask(context.Context, string, string, time.Time) (bool, error)
 }
@@ -189,6 +190,14 @@ func (c *ExecutionGraphsController) review(w http.ResponseWriter, r *http.Reques
 		graphBadRequest(w, r, "decision must be accept, revise, or reject")
 		return
 	}
+	evidence := domain.TaskReviewRecord{
+		SourceHead: request.SourceHead, PRURL: request.PRURL,
+		ValidationSummary: request.ValidationSummary, EvidenceRefs: request.EvidenceRefs,
+	}
+	if err := domain.ValidateTaskReviewEvidence(evidence); err != nil {
+		graphBadRequest(w, r, err.Error())
+		return
+	}
 	graphID, taskID := chi.URLParam(r, "graphId"), chi.URLParam(r, "taskId")
 	graph, found, err := c.Store.GetExecutionGraph(r.Context(), graphID)
 	if err != nil {
@@ -214,7 +223,7 @@ func (c *ExecutionGraphsController) review(w http.ResponseWriter, r *http.Reques
 		graphConflict(w, r, "Task is not awaiting review")
 		return
 	}
-	changed, err := c.Store.ResolveReview(r.Context(), graphID, taskID, request.AttemptID, decision, c.now())
+	changed, err := c.Store.ResolveReviewWithEvidence(r.Context(), graphID, taskID, request.AttemptID, decision, evidence, c.now())
 	if err != nil {
 		graphWriteError(w, r, err)
 		return

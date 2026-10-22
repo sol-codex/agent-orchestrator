@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -339,6 +340,92 @@ func TestExecutionReviewAcceptanceAndRestartRecovery(t *testing.T) {
 	graph = mustGraph(t, s, "g")
 	if graph.Tasks[0].State != domain.TaskCompleted || graph.Tasks[0].Assignment != nil || graph.Tasks[0].Attempts[0].FinishedAt == nil || graph.Revision != 6 {
 		t.Fatalf("review outcome graph: %+v", graph)
+	}
+}
+
+func TestExecutionReviewEvidencePersistsAcrossRestartAndCannotBeRewritten(t *testing.T) {
+	dataDir := t.TempDir()
+	s, err := sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	seedProject(t, s, "project")
+	ctx := context.Background()
+	now := time.Date(2026, 10, 22, 21, 0, 0, 0, time.UTC)
+	if err := s.SaveExecutionGraph(ctx, testGraph("g", "project", graphTask("t", domain.TaskReady))); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.ClaimTask(ctx, claimFor(t, s, "g", "t", "attempt-1", "codex", now)); err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.MarkRunning(ctx, "g", "t", "attempt-1", "session-1", now); err != nil || !ok {
+		t.Fatalf("running: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.MarkReview(ctx, "g", "t", "attempt-1", now); err != nil || !ok {
+		t.Fatalf("review: ok=%v err=%v", ok, err)
+	}
+	evidence := domain.TaskReviewRecord{
+		SourceHead:        "0123456789abcdef0123456789abcdef01234567",
+		PRURL:             "https://github.com/sol-codex/agent-orchestrator/pull/4",
+		ValidationSummary: "Focused store and controller tests passed at the source head.",
+		EvidenceRefs:      []string{"https://github.com/sol-codex/agent-orchestrator/actions/runs/1"},
+	}
+	if ok, err := s.ResolveReviewWithEvidence(ctx, "g", "t", "stale-attempt", execution.ReviewAccept, evidence, now); err != nil || ok {
+		t.Fatalf("stale review: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.ResolveReviewWithEvidence(ctx, "g", "t", "attempt-1", execution.ReviewRevise, evidence, now); err != nil || !ok {
+		t.Fatalf("revise: ok=%v err=%v", ok, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := mustGraph(t, s, "g")
+	if graph.Tasks[0].State != domain.TaskReady || len(graph.Tasks[0].Reviews) != 1 {
+		t.Fatalf("review history lost after restart: %+v", graph.Tasks[0])
+	}
+	review := graph.Tasks[0].Reviews[0]
+	if review.AttemptID != "attempt-1" || review.Decision != "revise" || !review.ReviewedAt.Equal(now) ||
+		review.SourceHead != evidence.SourceHead || review.PRURL != evidence.PRURL ||
+		review.ValidationSummary != evidence.ValidationSummary || len(review.EvidenceRefs) != 1 {
+		t.Fatalf("recovered review = %+v", review)
+	}
+	if ok, err := s.ResolveReviewWithEvidence(ctx, "g", "t", "attempt-1", execution.ReviewAccept, evidence, now); err != nil || ok {
+		t.Fatalf("duplicate stale review: ok=%v err=%v", ok, err)
+	}
+	graph.Revision++
+	graph.Tasks[0].Reviews[0].SourceHead = "abcdef0123456789abcdef0123456789abcdef01"
+	if err := s.SaveExecutionGraph(ctx, graph); err == nil || !strings.Contains(err.Error(), "review history changed") {
+		t.Fatalf("plan revision rewrote review: %v", err)
+	}
+	graph = mustGraph(t, s, "g")
+	graph.Revision++
+	graph.Tasks[0].Reviews = nil
+	if err := s.SaveExecutionGraph(ctx, graph); err == nil {
+		t.Fatal("plan revision erased review history")
+	}
+	if ok, err := s.ClaimTask(ctx, claimFor(t, s, "g", "t", "attempt-2", "codex", now.Add(time.Minute))); err != nil || !ok {
+		t.Fatalf("second claim: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.MarkRunning(ctx, "g", "t", "attempt-2", "session-2", now.Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("second running: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.MarkReview(ctx, "g", "t", "attempt-2", now.Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("second review: ok=%v err=%v", ok, err)
+	}
+	evidence.SourceHead = "abcdef0123456789abcdef0123456789abcdef01"
+	if ok, err := s.ResolveReviewWithEvidence(ctx, "g", "t", "attempt-2", execution.ReviewAccept, evidence, now.Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("accept second: ok=%v err=%v", ok, err)
+	}
+	graph = mustGraph(t, s, "g")
+	if graph.Tasks[0].State != domain.TaskCompleted || len(graph.Tasks[0].Reviews) != 2 ||
+		graph.Tasks[0].Reviews[0].Decision != "revise" || graph.Tasks[0].Reviews[1].Decision != "accept" ||
+		graph.Tasks[0].Reviews[1].SourceHead != evidence.SourceHead {
+		t.Fatalf("review outcomes were not appended: %+v", graph.Tasks[0].Reviews)
 	}
 }
 

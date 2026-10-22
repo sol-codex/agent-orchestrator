@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -54,25 +56,38 @@ type ExecutionSlice struct {
 // prevent a task from becoming ready. Resources name exclusive edit ownership;
 // the scheduler must lease them atomically before assigning work.
 type ExecutionTask struct {
-	ID                      string          `json:"id"`
-	SliceID                 string          `json:"sliceId"`
-	Objective               string          `json:"objective"`
-	Scope                   string          `json:"scope"`
-	Deliverables            []string        `json:"deliverables"`
-	AcceptanceCriteria      []string        `json:"acceptanceCriteria"`
-	Dependencies            []string        `json:"dependencies"`
-	SoftDependencies        []string        `json:"softDependencies,omitempty"`
-	Priority                int             `json:"priority"`
-	RecommendedCapabilities []string        `json:"recommendedCapabilities"`
-	PreferredAgent          string          `json:"preferredAgent,omitempty"`
-	FallbackAgents          []string        `json:"fallbackAgents"`
-	Resources               []string        `json:"resources"`
-	IntegrationRequirements []string        `json:"integrationRequirements"`
-	ValidationProcedures    []string        `json:"validationProcedures"`
-	Complexity              string          `json:"complexity"`
-	State                   TaskState       `json:"state"`
-	Assignment              *TaskAssignment `json:"assignment,omitempty"`
-	Attempts                []TaskAttempt   `json:"attempts"`
+	ID                      string             `json:"id"`
+	SliceID                 string             `json:"sliceId"`
+	Objective               string             `json:"objective"`
+	Scope                   string             `json:"scope"`
+	Deliverables            []string           `json:"deliverables"`
+	AcceptanceCriteria      []string           `json:"acceptanceCriteria"`
+	Dependencies            []string           `json:"dependencies"`
+	SoftDependencies        []string           `json:"softDependencies,omitempty"`
+	Priority                int                `json:"priority"`
+	RecommendedCapabilities []string           `json:"recommendedCapabilities"`
+	PreferredAgent          string             `json:"preferredAgent,omitempty"`
+	FallbackAgents          []string           `json:"fallbackAgents"`
+	Resources               []string           `json:"resources"`
+	IntegrationRequirements []string           `json:"integrationRequirements"`
+	ValidationProcedures    []string           `json:"validationProcedures"`
+	Complexity              string             `json:"complexity"`
+	State                   TaskState          `json:"state"`
+	Assignment              *TaskAssignment    `json:"assignment,omitempty"`
+	Attempts                []TaskAttempt      `json:"attempts"`
+	Reviews                 []TaskReviewRecord `json:"reviews,omitempty"`
+}
+
+// TaskReviewRecord is one immutable coordinator decision about a worker attempt.
+// Source and validation fields are references and short summaries, not logs.
+type TaskReviewRecord struct {
+	AttemptID         string    `json:"attemptId"`
+	Decision          string    `json:"decision"`
+	ReviewedAt        time.Time `json:"reviewedAt"`
+	SourceHead        string    `json:"sourceHead,omitempty"`
+	PRURL             string    `json:"prUrl,omitempty"`
+	ValidationSummary string    `json:"validationSummary,omitempty"`
+	EvidenceRefs      []string  `json:"evidenceRefs,omitempty"`
 }
 
 // TaskAssignment identifies the worker currently responsible for a task.
@@ -207,6 +222,9 @@ func ValidateExecutionGraph(graph ExecutionGraph) error {
 		if err := uniqueItems("task "+task.ID+" attempts", attemptIDs(task.Attempts)); err != nil {
 			return err
 		}
+		if err := validateTaskReviews(task); err != nil {
+			return err
+		}
 	}
 	for _, task := range graph.Tasks {
 		seen := make(map[string]struct{})
@@ -307,6 +325,14 @@ func ValidateExecutionGraphTransition(previous, next ExecutionGraph) error {
 		if err := validateAttemptContinuity(oldTask.Attempts, newTask.Attempts); err != nil {
 			return fmt.Errorf("task %q: %w", oldTask.ID, err)
 		}
+		if len(newTask.Reviews) < len(oldTask.Reviews) {
+			return fmt.Errorf("task %q: review history changed", oldTask.ID)
+		}
+		for i := range oldTask.Reviews {
+			if !reflect.DeepEqual(oldTask.Reviews[i], newTask.Reviews[i]) {
+				return fmt.Errorf("task %q: review history changed", oldTask.ID)
+			}
+		}
 		if (oldTask.State == TaskAssigned || oldTask.State == TaskRunning) &&
 			(newTask.State == TaskAssigned || newTask.State == TaskRunning) {
 			if !reflect.DeepEqual(oldTask.Resources, newTask.Resources) {
@@ -318,6 +344,70 @@ func ValidateExecutionGraphTransition(previous, next ExecutionGraph) error {
 				(oldTask.Assignment.Provider != "" && oldTask.Assignment.Provider != newTask.Assignment.Provider) {
 				return fmt.Errorf("task %q: active assignment changed", oldTask.ID)
 			}
+		}
+	}
+	return nil
+}
+
+func validateTaskReviews(task ExecutionTask) error {
+	attempts := make(map[string]TaskAttempt, len(task.Attempts))
+	for _, attempt := range task.Attempts {
+		attempts[attempt.ID] = attempt
+	}
+	seen := make(map[string]struct{}, len(task.Reviews))
+	for _, review := range task.Reviews {
+		if err := required("task "+task.ID+" review attemptId", review.AttemptID); err != nil {
+			return err
+		}
+		attempt, exists := attempts[review.AttemptID]
+		if !exists || attempt.FinishedAt == nil {
+			return fmt.Errorf("task %q: review must reference a finished attempt", task.ID)
+		}
+		if _, duplicate := seen[review.AttemptID]; duplicate {
+			return fmt.Errorf("task %q: duplicate review for attempt %q", task.ID, review.AttemptID)
+		}
+		seen[review.AttemptID] = struct{}{}
+		if review.Decision != "accept" && review.Decision != "revise" && review.Decision != "reject" {
+			return fmt.Errorf("task %q: invalid review decision %q", task.ID, review.Decision)
+		}
+		if review.ReviewedAt.IsZero() {
+			return fmt.Errorf("task %q: review time is required", task.ID)
+		}
+		if err := ValidateTaskReviewEvidence(review); err != nil {
+			return fmt.Errorf("task %q: %w", task.ID, err)
+		}
+	}
+	return nil
+}
+
+// ValidateTaskReviewEvidence bounds coordinator-supplied references so graph
+// snapshots remain small and do not become a store for test transcripts.
+func ValidateTaskReviewEvidence(review TaskReviewRecord) error {
+	if len(review.SourceHead) > 128 || len(review.PRURL) > 2048 || len(review.ValidationSummary) > 2000 || len(review.EvidenceRefs) > 20 {
+		return fmt.Errorf("review evidence exceeds size limit")
+	}
+	for _, value := range []string{review.SourceHead, review.PRURL, review.ValidationSummary} {
+		if value != strings.TrimSpace(value) {
+			return fmt.Errorf("review evidence values must be trimmed")
+		}
+	}
+	if review.SourceHead != "" {
+		if len(review.SourceHead) != 40 && len(review.SourceHead) != 64 {
+			return fmt.Errorf("review sourceHead must be a full Git object ID")
+		}
+		if _, err := hex.DecodeString(review.SourceHead); err != nil {
+			return fmt.Errorf("review sourceHead must be hexadecimal")
+		}
+	}
+	if review.PRURL != "" {
+		parsed, err := url.Parse(review.PRURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return fmt.Errorf("review prUrl must be an HTTPS URL without credentials")
+		}
+	}
+	for _, ref := range review.EvidenceRefs {
+		if len(ref) > 2048 || strings.TrimSpace(ref) == "" || ref != strings.TrimSpace(ref) {
+			return fmt.Errorf("review evidence reference must be nonempty, trimmed, and at most 2048 bytes")
 		}
 	}
 	return nil

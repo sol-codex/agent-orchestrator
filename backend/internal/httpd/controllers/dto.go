@@ -2109,8 +2109,12 @@ type ListExecutionGraphsResponse struct {
 // ReviewExecutionTaskRequest records an explicit acceptance decision for one
 // finished worker attempt. The current task must be awaiting review.
 type ReviewExecutionTaskRequest struct {
-	AttemptID string `json:"attemptId"`
-	Decision  string `json:"decision" enum:"accept,revise,reject"`
+	AttemptID         string   `json:"attemptId"`
+	Decision          string   `json:"decision" enum:"accept,revise,reject"`
+	SourceHead        string   `json:"sourceHead,omitempty"`
+	PRURL             string   `json:"prUrl,omitempty"`
+	ValidationSummary string   `json:"validationSummary,omitempty"`
+	EvidenceRefs      []string `json:"evidenceRefs,omitempty"`
 }
 
 // ListAutomationsQuery describes filters and pagination for automation definitions.
