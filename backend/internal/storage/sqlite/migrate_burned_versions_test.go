@@ -228,6 +228,7 @@ var shippedMigrations = map[int64]string{
 	20261023150750236: "20261023150750236_prepared_execution_graphs.sql",
 	20261023154617776: "20261023154617776_prepared_execution_graph_receipts.sql",
 	20261023195138535: "20261023195138535_hub_ao_activation_ledger.sql",
+	20261023201303962: "20261023201303962_hub_ao_dispatch_fence.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they

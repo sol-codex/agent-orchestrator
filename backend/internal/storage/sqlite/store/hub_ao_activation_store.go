@@ -228,6 +228,9 @@ func (s *Store) commitHubAOActivation(ctx context.Context, input hubAOActivation
 			activationID, 1, "active", now); err != nil {
 			return err
 		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO hub_ao_graph_origins(graph_id) VALUES(?)`, input.GraphID); err != nil {
+			return err
+		}
 		deleted, err := db.ExecContext(ctx, `DELETE FROM prepared_execution_graphs WHERE id=? AND prepare_id=?`, input.GraphID, input.PrepareID)
 		if err != nil {
 			return err
