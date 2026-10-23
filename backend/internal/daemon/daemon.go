@@ -44,6 +44,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
+	"github.com/aoagents/agent-orchestrator/backend/internal/hubcontrol"
 	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/sentryobs"
@@ -1052,6 +1053,11 @@ func Run(buildVersion string) error {
 	}
 	browserLive.SetLoopbackBaseURL("http://" + srv.Addr().String())
 	previewDone := preview.NewPoller(store, sessionSvc, "http://"+srv.Addr().String(), preview.PollerConfig{Logger: log}).Start(ctx)
+	// Hub control remains unarmed until attended enrollment and permit
+	// verification are integrated. No credential is loaded or synthesized here.
+	if _, err := hubcontrol.Start(ctx, cfg.RunFilePath, nil); err != nil {
+		log.Warn("hub control disabled", "err", err)
+	}
 	_ = os.Unsetenv(browserruntime.RuntimeAddressEnv)
 	if ln, addr, err := browserruntime.Listen(cfg.RunFilePath); err != nil {
 		log.Warn("browser runtime: listener unavailable; agent browser control disabled", "err", err)
