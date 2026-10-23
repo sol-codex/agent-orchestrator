@@ -18,6 +18,8 @@ CREATE TABLE hub_ao_activations (
     prepared_created_at TIMESTAMP NOT NULL,
     graph_bytes_sha256 TEXT NOT NULL CHECK (length(graph_bytes_sha256) = 64),
     receipt_identity_sha256 TEXT NOT NULL CHECK (length(receipt_identity_sha256) = 64),
+    graph_contract_digest TEXT NOT NULL CHECK (length(graph_contract_digest) = 64),
+    hub_ao_plan_binding_digest TEXT NOT NULL CHECK (length(hub_ao_plan_binding_digest) = 64),
     grant_id TEXT NOT NULL UNIQUE,
     grant_digest TEXT NOT NULL CHECK (length(grant_digest) = 64),
     redemption_id TEXT NOT NULL UNIQUE,

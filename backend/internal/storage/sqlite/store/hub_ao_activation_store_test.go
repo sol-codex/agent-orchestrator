@@ -61,6 +61,7 @@ func activationStoreFixture(t *testing.T) (*Store, *sql.DB, hubAOActivationInput
 	input := hubAOActivationInput{
 		GraphID: graph.ID, ProjectID: string(graph.ProjectID), PrepareID: receipt.PrepareID,
 		GraphBytesSHA256: receipt.GraphBytesSHA256, ReceiptIdentitySHA256: receipt.ReceiptIdentitySHA256,
+		GraphContractDigest: strings.Repeat("d", 64), HubAOPlanBindingDigest: strings.Repeat("e", 64),
 		GrantID: "grant-1", GrantDigest: strings.Repeat("a", 64), RedemptionID: "redemption-1",
 		PermitDigest: strings.Repeat("b", 64), PermitUseBy: format(now.Add(time.Minute)),
 		ActivationAttemptID: "attempt-1", CheckID: "check-1", CurrentnessDigest: strings.Repeat("c", 64),
@@ -115,10 +116,29 @@ func TestHubAOActivationStoreRequiresEnrollmentAndCommitsOnce(t *testing.T) {
 	if err != nil || created || retry != record {
 		t.Fatalf("identical retry produced another activation: created=%v err=%v", created, err)
 	}
+	// A new store instance reconstructs the complete persisted receipt after restart.
+	restarted := NewStore(db, db)
+	reconstructed, found, err := readHubAOActivation(ctx, db, input)
+	if err != nil || !found || reconstructed != record ||
+		reconstructed.GraphContractDigest != input.GraphContractDigest ||
+		reconstructed.HubAOPlanBindingDigest != input.HubAOPlanBindingDigest {
+		t.Fatalf("persisted receipt reconstruction: found=%v err=%v", found, err)
+	}
+	if replay, created, err := restarted.commitHubAOActivation(ctx, input); err != nil || created || replay != record {
+		t.Fatalf("restart replay changed receipt: created=%v err=%v", created, err)
+	}
 	changed := input
 	changed.GrantDigest = strings.Repeat("d", 64)
 	if _, created, err := s.commitHubAOActivation(ctx, changed); !errors.Is(err, execution.ErrGraphConflict) || created {
 		t.Fatalf("changed replay: created=%v err=%v", created, err)
+	}
+	for _, changed := range []hubAOActivationInput{
+		func() hubAOActivationInput { v := input; v.GraphContractDigest = strings.Repeat("9", 64); return v }(),
+		func() hubAOActivationInput { v := input; v.HubAOPlanBindingDigest = strings.Repeat("9", 64); return v }(),
+	} {
+		if _, created, err := restarted.commitHubAOActivation(ctx, changed); !errors.Is(err, execution.ErrGraphConflict) || created {
+			t.Fatalf("changed persisted receipt digest replay: created=%v err=%v", created, err)
+		}
 	}
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM hub_ao_activations`).Scan(&count); err != nil || count != 1 {
@@ -178,6 +198,8 @@ func TestHubAOActivationStoreRollsBackAndFencesIdentity(t *testing.T) {
 		func() hubAOActivationInput { v := input; v.StoreID = "other-store"; return v }(),
 		func() hubAOActivationInput { v := input; v.ReceiptIdentitySHA256 = strings.Repeat("9", 64); return v }(),
 		func() hubAOActivationInput { v := input; v.GraphBytesSHA256 = strings.Repeat("9", 64); return v }(),
+		func() hubAOActivationInput { v := input; v.GraphContractDigest = "invalid"; return v }(),
+		func() hubAOActivationInput { v := input; v.HubAOPlanBindingDigest = "invalid"; return v }(),
 		func() hubAOActivationInput { v := input; v.CurrentnessUseBy = "2000-01-01T00:00:00.000Z"; return v }(),
 	} {
 		if _, created, err := s.commitHubAOActivation(ctx, changed); err == nil || created {

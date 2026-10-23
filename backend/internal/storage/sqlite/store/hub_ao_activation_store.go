@@ -21,25 +21,27 @@ import (
 // obtain host/store/generation/epoch from server-owned state, never request JSON.
 // No production caller constructs this input in this source slice.
 type hubAOActivationInput struct {
-	GraphID               string
-	ProjectID             string
-	PrepareID             string
-	GraphBytesSHA256      string
-	ReceiptIdentitySHA256 string
-	GrantID               string
-	GrantDigest           string
-	RedemptionID          string
-	PermitDigest          string
-	PermitUseBy           string
-	ActivationAttemptID   string
-	CheckID               string
-	CurrentnessDigest     string
-	CurrentnessCheckedAt  string
-	CurrentnessUseBy      string
-	HostID                string
-	StoreID               string
-	HostGeneration        int64
-	AuthorityEpoch        int64
+	GraphID                string
+	ProjectID              string
+	PrepareID              string
+	GraphBytesSHA256       string
+	ReceiptIdentitySHA256  string
+	GraphContractDigest    string
+	HubAOPlanBindingDigest string
+	GrantID                string
+	GrantDigest            string
+	RedemptionID           string
+	PermitDigest           string
+	PermitUseBy            string
+	ActivationAttemptID    string
+	CheckID                string
+	CurrentnessDigest      string
+	CurrentnessCheckedAt   string
+	CurrentnessUseBy       string
+	HostID                 string
+	StoreID                string
+	HostGeneration         int64
+	AuthorityEpoch         int64
 }
 
 type hubAOActivationRecord struct {
@@ -83,6 +85,7 @@ func (input hubAOActivationInput) validate(now time.Time) error {
 		return err
 	}
 	for _, digest := range []string{input.GraphBytesSHA256, input.ReceiptIdentitySHA256,
+		input.GraphContractDigest, input.HubAOPlanBindingDigest,
 		input.GrantDigest, input.PermitDigest, input.CurrentnessDigest} {
 		if !validHubAOActivationDigest(digest) {
 			return errors.New("Hub AO activation: invalid digest")
@@ -109,7 +112,7 @@ func (input hubAOActivationInput) validate(now time.Time) error {
 }
 
 func readHubAOActivation(ctx context.Context, db gen.DBTX, input hubAOActivationInput) (hubAOActivationRecord, bool, error) {
-	rows, err := db.QueryContext(ctx, `SELECT graph_id,project_id,prepare_id,prepared_created_at,graph_bytes_sha256,receipt_identity_sha256,
+	rows, err := db.QueryContext(ctx, `SELECT graph_id,project_id,prepare_id,prepared_created_at,graph_bytes_sha256,receipt_identity_sha256,graph_contract_digest,hub_ao_plan_binding_digest,
 		grant_id,grant_digest,redemption_id,permit_digest,permit_use_by,activation_attempt_id,check_id,currentness_digest,
 		currentness_checked_at,currentness_use_by,host_id,store_id,host_generation,authority_epoch,activation_id,graph_revision,state,activated_at
 		FROM hub_ao_activations WHERE graph_id=? OR prepare_id=? OR grant_id=? OR redemption_id=? OR activation_attempt_id=? OR check_id=?`,
@@ -123,7 +126,8 @@ func readHubAOActivation(ctx context.Context, db gen.DBTX, input hubAOActivation
 	}
 	var record hubAOActivationRecord
 	if err := rows.Scan(&record.GraphID, &record.ProjectID, &record.PrepareID, &record.PreparedCreatedAt,
-		&record.GraphBytesSHA256, &record.ReceiptIdentitySHA256, &record.GrantID, &record.GrantDigest,
+		&record.GraphBytesSHA256, &record.ReceiptIdentitySHA256, &record.GraphContractDigest, &record.HubAOPlanBindingDigest,
+		&record.GrantID, &record.GrantDigest,
 		&record.RedemptionID, &record.PermitDigest, &record.PermitUseBy, &record.ActivationAttemptID,
 		&record.CheckID, &record.CurrentnessDigest, &record.CurrentnessCheckedAt, &record.CurrentnessUseBy,
 		&record.HostID, &record.StoreID, &record.HostGeneration, &record.AuthorityEpoch,
@@ -211,12 +215,13 @@ func (s *Store) commitHubAOActivation(ctx context.Context, input hubAOActivation
 			return err
 		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO hub_ao_activations(
-			graph_id,project_id,prepare_id,prepared_created_at,graph_bytes_sha256,receipt_identity_sha256,
+			graph_id,project_id,prepare_id,prepared_created_at,graph_bytes_sha256,receipt_identity_sha256,graph_contract_digest,hub_ao_plan_binding_digest,
 			grant_id,grant_digest,redemption_id,permit_digest,permit_use_by,activation_attempt_id,check_id,
 			currentness_digest,currentness_checked_at,currentness_use_by,host_id,store_id,host_generation,authority_epoch,
-			activation_id,graph_revision,state,activated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			activation_id,graph_revision,state,activated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			input.GraphID, input.ProjectID, input.PrepareID, preparedCreatedAt,
-			input.GraphBytesSHA256, input.ReceiptIdentitySHA256, input.GrantID, input.GrantDigest,
+			input.GraphBytesSHA256, input.ReceiptIdentitySHA256, input.GraphContractDigest, input.HubAOPlanBindingDigest,
+			input.GrantID, input.GrantDigest,
 			input.RedemptionID, input.PermitDigest, input.PermitUseBy, input.ActivationAttemptID, input.CheckID,
 			input.CurrentnessDigest, input.CurrentnessCheckedAt, input.CurrentnessUseBy,
 			input.HostID, input.StoreID, input.HostGeneration, input.AuthorityEpoch,
