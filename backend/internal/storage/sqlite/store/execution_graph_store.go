@@ -168,7 +168,7 @@ func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, gra
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		var priorID, priorGraphID, priorProjectID, priorDigest, priorBody string
+		var priorID, priorGraphID, priorProjectID, priorDigest, priorReceiptDigest, priorBody string
 		var priorCreated time.Time
 		var matchingRows int
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM prepared_execution_graphs WHERE id=? OR prepare_id=?`, graph.ID, prepareID).Scan(&matchingRows); err != nil {
@@ -177,9 +177,9 @@ func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, gra
 		if matchingRows > 1 {
 			return execution.ErrGraphConflict
 		}
-		err = db.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE id=? OR prepare_id=?`, graph.ID, prepareID).Scan(&priorID, &priorGraphID, &priorProjectID, &priorDigest, &priorBody, &priorCreated)
+		err = db.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,receipt_identity_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE id=? OR prepare_id=?`, graph.ID, prepareID).Scan(&priorID, &priorGraphID, &priorProjectID, &priorDigest, &priorReceiptDigest, &priorBody, &priorCreated)
 		if err == nil {
-			priorReceipt, err := verifiedPreparedReceipt(priorID, priorGraphID, priorProjectID, priorDigest, priorBody, priorCreated)
+			priorReceipt, err := verifiedPreparedReceipt(priorID, priorGraphID, priorProjectID, priorDigest, priorReceiptDigest, priorBody, priorCreated)
 			if err != nil {
 				return err
 			}
@@ -200,7 +200,11 @@ func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, gra
 			return err
 		}
 		now := time.Now().UTC()
-		if _, err := db.ExecContext(ctx, `INSERT INTO prepared_execution_graphs(id,project_id,graph_json,created_at,prepare_id,graph_bytes_sha256) VALUES(?,?,?,?,?,?)`, graph.ID, string(graph.ProjectID), string(body), now, prepareID, digest); err != nil {
+		receiptDigest, err := preparedReceiptIdentityDigest(prepareID, graph.ID, string(graph.ProjectID), digest, now)
+		if err != nil {
+			return err
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO prepared_execution_graphs(id,project_id,graph_json,created_at,prepare_id,graph_bytes_sha256,receipt_identity_sha256) VALUES(?,?,?,?,?,?,?)`, graph.ID, string(graph.ProjectID), string(body), now, prepareID, digest, receiptDigest); err != nil {
 			return err
 		}
 		receipt = domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, GraphBytesSHA256: digest, Status: "prepared", CreatedAt: now}
@@ -212,19 +216,19 @@ func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, gra
 
 func (s *Store) GetPreparedExecutionGraph(ctx context.Context, id string, byGraphID bool) (domain.PreparedExecutionGraphReceipt, bool, error) {
 	var receipt domain.PreparedExecutionGraphReceipt
-	var projectID, graphJSON string
+	var projectID, graphJSON, receiptDigest string
 	var column = "prepare_id"
 	if byGraphID {
 		column = "id"
 	}
-	err := s.readDB.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE `+column+`=?`, id).Scan(&receipt.PrepareID, &receipt.GraphID, &projectID, &receipt.GraphBytesSHA256, &graphJSON, &receipt.CreatedAt)
+	err := s.readDB.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,receipt_identity_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE `+column+`=?`, id).Scan(&receipt.PrepareID, &receipt.GraphID, &projectID, &receipt.GraphBytesSHA256, &receiptDigest, &graphJSON, &receipt.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return receipt, false, nil
 	}
 	if err != nil {
 		return receipt, false, err
 	}
-	verified, err := verifiedPreparedReceipt(receipt.PrepareID, receipt.GraphID, projectID, receipt.GraphBytesSHA256, graphJSON, receipt.CreatedAt)
+	verified, err := verifiedPreparedReceipt(receipt.PrepareID, receipt.GraphID, projectID, receipt.GraphBytesSHA256, receiptDigest, graphJSON, receipt.CreatedAt)
 	if err != nil {
 		return receipt, false, err
 	}
@@ -240,8 +244,15 @@ func validatePrepareID(id string) error {
 
 // verifiedPreparedReceipt refuses a positive receipt if persisted bytes no
 // longer match their full-graph digest or the row's graph/project identity.
-func verifiedPreparedReceipt(prepareID, graphID, projectID, digest, graphJSON string, createdAt time.Time) (domain.PreparedExecutionGraphReceipt, error) {
+func verifiedPreparedReceipt(prepareID, graphID, projectID, digest, receiptDigest, graphJSON string, createdAt time.Time) (domain.PreparedExecutionGraphReceipt, error) {
 	var receipt domain.PreparedExecutionGraphReceipt
+	if err := validatePrepareID(prepareID); err != nil {
+		return receipt, fmt.Errorf("prepared graph %q has invalid prepare ID: %w", graphID, err)
+	}
+	expectedReceiptDigest, err := preparedReceiptIdentityDigest(prepareID, graphID, projectID, digest, createdAt)
+	if err != nil || receiptDigest != expectedReceiptDigest {
+		return receipt, fmt.Errorf("prepared graph %q failed receipt identity check", graphID)
+	}
 	var graph domain.ExecutionGraph
 	if err := json.Unmarshal([]byte(graphJSON), &graph); err != nil {
 		return receipt, fmt.Errorf("prepared graph %q corrupt JSON: %w", graphID, err)
@@ -255,6 +266,18 @@ func verifiedPreparedReceipt(prepareID, graphID, projectID, digest, graphJSON st
 		return receipt, fmt.Errorf("prepared graph %q failed stored-byte integrity check", graphID)
 	}
 	return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graphID, ProjectID: domain.ProjectID(projectID), GraphBytesSHA256: digest, Status: "prepared", CreatedAt: createdAt}, nil
+}
+
+func preparedReceiptIdentityDigest(prepareID, graphID, projectID, graphDigest string, createdAt time.Time) (string, error) {
+	if createdAt.IsZero() || createdAt.Year() < 2000 || createdAt.Year() > 9999 {
+		return "", errors.New("prepared receipt creation time is out of bounds")
+	}
+	payload, err := json.Marshal([]string{"ao.prepared-receipt/1", prepareID, graphID, projectID, graphDigest, createdAt.UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(payload)
+	return hex.EncodeToString(hash[:]), nil
 }
 
 func runtimeState(state domain.TaskState) bool {

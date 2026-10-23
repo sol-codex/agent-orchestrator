@@ -193,6 +193,60 @@ func TestPreparedExecutionGraphReceiptRejectsCorruptStoredBytes(t *testing.T) {
 	}
 }
 
+func TestPreparedExecutionGraphReceiptRejectsCorruptMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name, column, lookupID string
+		value                  any
+	}{
+		{name: "prepare ID", column: "prepare_id", lookupID: "prep-forged", value: "prep-forged"},
+		{name: "creation time", column: "created_at", lookupID: "prep-original", value: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			s, err := sqlite.Open(dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedProject(t, s, "project")
+			ctx := context.Background()
+			graph := testGraph("prepared-metadata", "project", graphTask("ready", domain.TaskReady))
+			if _, _, err := s.PrepareExecutionGraph(ctx, "prep-original", graph); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dataDir, "ao.db")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			statement := `UPDATE prepared_execution_graphs SET ` + tc.column + `=? WHERE id=?`
+			if _, err := db.ExecContext(ctx, statement, tc.value, graph.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s, err = sqlite.Open(dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = s.Close() }()
+			for _, lookup := range []struct {
+				id        string
+				byGraphID bool
+			}{{tc.lookupID, false}, {graph.ID, true}} {
+				if got, found, err := s.GetPreparedExecutionGraph(ctx, lookup.id, lookup.byGraphID); err == nil || found {
+					t.Fatalf("corrupt metadata returned positive receipt: got=%#v found=%v err=%v", got, found, err)
+				}
+			}
+			if got, created, err := s.PrepareExecutionGraph(ctx, "prep-original", graph); err == nil || created {
+				t.Fatalf("corrupt metadata retry returned got=%#v created=%v err=%v", got, created, err)
+			}
+		})
+	}
+}
+
 func TestPrepareExecutionGraphRejectsRuntimeFactsAndActiveID(t *testing.T) {
 	s := newTestStore(t)
 	seedProject(t, s, "project")
