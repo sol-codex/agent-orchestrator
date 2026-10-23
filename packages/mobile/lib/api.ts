@@ -111,6 +111,8 @@ export type DashboardSession = {
 	provisionError?: string;
 	/** The daemon's start-up stages while a Chat session provisions. Absent from older daemons. */
 	provisionSteps?: SessionProvisionStep[];
+	/** Set while the task's generated branch name is on the way; keep `branch` private meanwhile. */
+	branchNaming?: boolean;
 	isPinned?: boolean;
 	pinnedAt?: string | null;
 	/** Automatically review each new pull-request head. */
@@ -212,6 +214,7 @@ type WireSession = {
 	provisionState?: "provisioning" | "ready" | "failed";
 	provisionError?: string;
 	provisionSteps?: SessionProvisionStep[];
+	branchNaming?: boolean;
 	status?: string | null;
 	kanbanColumn?: string | null;
 	displayStatus?: string | null;
@@ -316,6 +319,7 @@ function mapSession(s: WireSession): DashboardSession {
 		provisionState: s.provisionState,
 		provisionError: s.provisionError,
 		provisionSteps: s.provisionSteps?.length ? s.provisionSteps : undefined,
+		branchNaming: !!s.branchNaming,
 		isPinned: !!s.isPinned,
 		pinnedAt: s.pinnedAt ?? null,
 		autoReviewEnabled: !!s.autoReviewEnabled,
@@ -774,6 +778,11 @@ export async function clearNotification(cfg: ServerConfig, id: string): Promise<
 	}
 }
 
+// Clears the machine's whole history, not just the rows the screen has loaded.
+export async function clearAllNotifications(cfg: ServerConfig): Promise<void> {
+	await req(cfg, `${API}/notifications`, { method: "DELETE" });
+}
+
 // ---- Notification history ---------------------------------------------------
 
 export type NotificationType =
@@ -824,8 +833,13 @@ export async function getNotifications(
 	};
 }
 
-export async function markAllNotificationsRead(cfg: ServerConfig): Promise<void> {
-	await req(cfg, `${API}/notifications/read-all`, { method: "POST" });
+// With ids, only those rows are marked, so unread rows on pages the screen has
+// not loaded yet stay unread. Without ids, every unread row on the machine is.
+export async function markAllNotificationsRead(cfg: ServerConfig, ids?: string[]): Promise<void> {
+	await req(cfg, `${API}/notifications/read-all`, {
+		method: "POST",
+		...(ids && ids.length > 0 ? { body: JSON.stringify({ ids }) } : {}),
+	});
 }
 
 // ---- Pull request detail ----------------------------------------------------

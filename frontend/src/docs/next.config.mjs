@@ -7,6 +7,11 @@ const config = {
   output: "export",
   reactStrictMode: true,
   trailingSlash: true,
+  experimental: {
+    // Compiles the Lingui macros. Keep the plugin version pinned to one
+    // that matches Next's swc_core.
+    swcPlugins: [["@lingui/swc-plugin", {}]],
+  },
   turbopack: {
     root: import.meta.dirname,
   },

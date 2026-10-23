@@ -15584,6 +15584,8 @@ components:
           type: boolean
         branch:
           type: string
+        branchNaming:
+          type: boolean
         branchState:
           $ref: '#/components/schemas/SessionBranchState'
         chatProviderPreserved:
@@ -15887,6 +15889,7 @@ components:
           - mcp_tool
           - auto_review
           - user_input
+          - ao_action
           type: string
         createdAt:
           type: string
