@@ -54,6 +54,36 @@ func TestHubPiecePromptProjectsOnlyBoundedHandoff(t *testing.T) {
 	}
 }
 
+func TestHubPiecePromptDropsHubPermittedNestedExtensions(t *testing.T) {
+	const sentinel = "FORBIDDEN_ADDITIVE_PLANNING_TEXT_6492"
+	var handoff map[string]any
+	if err := json.Unmarshal([]byte(validHubPiece), &handoff); err != nil {
+		t.Fatal(err)
+	}
+	spec := handoff["spec"].(map[string]any)
+	spec["matchers"].([]any)[0].(map[string]any)["futureMatcherDetail"] = sentinel
+	spec["guardrails"] = map[string]any{
+		"mode": "strict", "futureGuardrailDetail": sentinel,
+		"invariants": []any{map[string]any{"type": "word", "words": []string{"safe"}, "futureInvariantDetail": sentinel}},
+	}
+	handoff["provenance"] = map[string]any{"signer": "bounded-signer", "futureProvenanceDetail": sentinel}
+	raw, err := json.Marshal(handoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedInput := string(raw)
+	prompt, err := projectHubPiecePrompt(raw)
+	if err != nil {
+		t.Fatalf("Hub-permitted nested additions should remain admissible: %v", err)
+	}
+	if string(raw) != sealedInput {
+		t.Fatal("prompt projection mutated the sealed handoff bytes")
+	}
+	if strings.Contains(prompt, sentinel) || !strings.Contains(prompt, "bounded-signer") || !strings.Contains(prompt, `"mode":"strict"`) {
+		t.Fatalf("named-field projection mishandled nested additions: %q", prompt)
+	}
+}
+
 func TestHubPiecePromptRejectsPlanningEnvelopeAndExtraTask(t *testing.T) {
 	for name, input := range map[string]string{
 		"graph objective":      strings.Replace(validHubPiece, `"jobId":"opaque-job-7",`, `"jobId":"opaque-job-7","graphObjective":"FORBIDDEN_GRAPH_OBJECTIVE_4831",`, 1),
@@ -80,6 +110,7 @@ func TestHubPiecePromptRejectsMissingAndInvalidHandoff(t *testing.T) {
 		"no effects":                 strings.Replace(validHubPiece, `"allowedEffects":["fs:read"]`, `"allowedEffects":[]`, 1),
 		"mutating SAFE":              strings.Replace(validHubPiece, `"allowedEffects":["fs:read"]`, `"allowedEffects":["fs:write"]`, 1),
 		"missing matchers":           strings.Replace(validHubPiece, `"matchers":[{"id":"exit-ok","type":"status","status":[0]}]`, `"matchers":[]`, 1),
+		"invalid regex":              strings.Replace(validHubPiece, `"type":"status","status":[0]`, `"type":"regex","regex":["["]`, 1),
 		"invalid matcher condition":  strings.Replace(validHubPiece, `"type":"status","status":[0]`, `"type":"status","status":[0],"condition":"xor"`, 1),
 		"receipt spoofing guardrail": strings.Replace(validHubPiece, `"matchers":[{"id":"exit-ok","type":"status","status":[0]}]`, `"matchers":[{"id":"exit-ok","type":"status","status":[0]}],"guardrails":{"mode":"chameleon"}`, 1),
 		"upward cwd":                 strings.Replace(validHubPiece, `"cwd":"packages/piece"`, `"cwd":"../other"`, 1),

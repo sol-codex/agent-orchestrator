@@ -70,6 +70,50 @@ type hubPieceProvenance struct {
 	ManifestHash string `json:"manifestHash,omitempty"`
 }
 
+// Hub's PieceHandoff admission requires exact handoff and spec keys, while
+// matcher, guardrail, invariant, and provenance objects permit additive keys.
+// Decode those nested objects into named fields so extensions are accepted but
+// cannot be projected into the prompt. The original sealed bytes are untouched.
+func (m *hubPieceMatcher) UnmarshalJSON(data []byte) error {
+	type named hubPieceMatcher
+	var value named
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*m = hubPieceMatcher(value)
+	return nil
+}
+
+func (g *hubPieceGuardrail) UnmarshalJSON(data []byte) error {
+	type named hubPieceGuardrail
+	var value named
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*g = hubPieceGuardrail(value)
+	return nil
+}
+
+func (i *hubPieceGuardrailCheck) UnmarshalJSON(data []byte) error {
+	type named hubPieceGuardrailCheck
+	var value named
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*i = hubPieceGuardrailCheck(value)
+	return nil
+}
+
+func (p *hubPieceProvenance) UnmarshalJSON(data []byte) error {
+	type named hubPieceProvenance
+	var value named
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*p = hubPieceProvenance(value)
+	return nil
+}
+
 var hubSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var hubMutatingEffect = regexp.MustCompile(`(?i)^(?:fs:(?:write|delete|move|rename|create)|net:|process:privileged|system:)`)
 
@@ -173,6 +217,14 @@ func validateHubPieceHandoff(h hubPieceHandoff) error {
 		case "regex":
 			if len(matcher.Regex) == 0 {
 				return errors.New("regex matcher needs patterns")
+			}
+			// Hub validates JavaScript regex syntax. Go's RE2 syntax is a
+			// conservative subset for this prompt boundary; a JS-only pattern
+			// fails closed until the bridge has a shared validator.
+			for _, pattern := range matcher.Regex {
+				if _, err := regexp.Compile(pattern); err != nil {
+					return fmt.Errorf("invalid or unsupported Hub piece regex: %w", err)
+				}
 			}
 		case "file_exists":
 			if !hubRelativePath(matcher.Path) {
