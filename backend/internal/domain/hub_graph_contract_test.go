@@ -2,7 +2,7 @@ package domain
 
 import "testing"
 
-const hubGraphFixtureDigest = "34f81de4904f6b0301c890faac4e51ba6326646c6be8240beff073fee7613f2d"
+const hubGraphFixtureDigest = "d569629af2f68ad25a24d5c8a005aa99d98515cccfc50829a2a7f1d5999d2fe4"
 
 func TestHubGraphContractDigestMatchesHubFixture(t *testing.T) {
 	graph := ExecutionGraph{
@@ -16,7 +16,7 @@ func TestHubGraphContractDigestMatchesHubFixture(t *testing.T) {
 			ID: "task-1", SliceID: "slice-1", Objective: "Complete bounded piece",
 			Scope: "One piece", Deliverables: []string{"Source change"},
 			AcceptanceCriteria: []string{"Evidence reviewed"}, Priority: 1,
-			Resources: []string{"src/example.ts"}, ValidationProcedures: []string{"Review source"},
+			Resources: []string{"src/contracts/investigation.ts"}, ValidationProcedures: []string{"Review source"},
 			Complexity: "low", State: TaskPending,
 		}},
 	}
