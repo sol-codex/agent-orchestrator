@@ -57,7 +57,8 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 		// Hub-origin graphs remain sealed after activation. The ordinary graph
 		// import/update API cannot become an alternate authority path.
 		var activatedID string
-		err = db.QueryRowContext(ctx, `SELECT graph_id FROM hub_ao_activations WHERE graph_id=?`, graph.ID).Scan(&activatedID)
+		err = db.QueryRowContext(ctx, `SELECT ? WHERE EXISTS(SELECT 1 FROM hub_ao_graph_origins WHERE graph_id=?)
+			OR EXISTS(SELECT 1 FROM hub_ao_activations WHERE graph_id=?)`, graph.ID, graph.ID, graph.ID).Scan(&activatedID)
 		if err == nil {
 			return execution.ErrGraphConflict
 		}
@@ -424,7 +425,11 @@ func hardDepsComplete(graph *domain.ExecutionGraph, task domain.ExecutionTask) b
 }
 
 func (s *Store) MarkReady(ctx context.Context, graphID, taskID string, at time.Time) (bool, error) {
-	return s.mutateExecutionGraph(ctx, graphID, at, func(graph *domain.ExecutionGraph, _ gen.DBTX) (bool, error) {
+	return s.mutateExecutionGraph(ctx, graphID, at, func(graph *domain.ExecutionGraph, db gen.DBTX) (bool, error) {
+		allowed, err := hubAODispatchAllowed(ctx, db, graphID)
+		if err != nil || !allowed {
+			return false, err
+		}
 		i := taskIndex(graph, taskID)
 		if i < 0 {
 			return false, nil
@@ -499,6 +504,10 @@ func (s *Store) ClaimTask(ctx context.Context, claim execution.Claim) (bool, err
 		return false, fmt.Errorf("execution claim: attempt, agent, provider, contract fingerprint and valid lease required")
 	}
 	return s.mutateExecutionGraph(ctx, claim.GraphID, claim.At, func(graph *domain.ExecutionGraph, db gen.DBTX) (bool, error) {
+		allowed, err := hubAODispatchAllowed(ctx, db, claim.GraphID)
+		if err != nil || !allowed {
+			return false, err
+		}
 		i := taskIndex(graph, claim.TaskID)
 		if i < 0 {
 			return false, nil

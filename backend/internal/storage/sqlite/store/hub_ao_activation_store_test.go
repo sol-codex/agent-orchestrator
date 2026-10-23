@@ -33,16 +33,21 @@ func activationStoreFixture(t *testing.T) (*Store, *sql.DB, hubAOActivationInput
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../migrations/20261023195138535_hub_ao_activation_ledger.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, ok := strings.Cut(string(migration), "-- +goose Down")
-	if !ok {
-		t.Fatal("activation migration missing Down boundary")
-	}
-	if _, err := db.Exec(up); err != nil {
-		t.Fatalf("activation migration: %v", err)
+	for _, path := range []string{
+		"../migrations/20261023195138535_hub_ao_activation_ledger.sql",
+		"../migrations/20261023201303962_hub_ao_dispatch_fence.sql",
+	} {
+		migration, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, ok := strings.Cut(string(migration), "-- +goose Down")
+		if !ok {
+			t.Fatalf("migration %s missing Down boundary", path)
+		}
+		if _, err := db.Exec(up); err != nil {
+			t.Fatalf("migration %s: %v", path, err)
+		}
 	}
 	s := NewStore(db, db)
 	graph := domain.ExecutionGraph{
