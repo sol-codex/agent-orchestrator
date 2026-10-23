@@ -1,8 +1,7 @@
-import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { source } from "@/lib/source";
-import { baseOptions } from "@/lib/layout.shared";
 import type { ReactNode } from "react";
 import { visibleProductName } from "@/lib/branding";
+import { LocalizedDocsLayout } from "@/components/docs-layout";
 
 type Tree = ReturnType<typeof source.getPageTree>;
 type Node = Tree["children"][number];
@@ -32,9 +31,5 @@ function displayTree(tree: Tree): Tree {
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
-  return (
-    <DocsLayout tree={displayTree(source.getPageTree())} {...baseOptions()}>
-      {children}
-    </DocsLayout>
-  );
+  return <LocalizedDocsLayout tree={displayTree(source.getPageTree())}>{children}</LocalizedDocsLayout>;
 }
