@@ -64,6 +64,7 @@ type lifecycleStack struct {
 	trackerDone      <-chan struct{}
 	herdr            *herdr.Server
 	automationDone   <-chan struct{}
+	executionDone    <-chan struct{}
 }
 
 // startLifecycle constructs the Lifecycle Manager over the store and starts the
@@ -194,6 +195,9 @@ func (l *lifecycleStack) Stop() {
 	}
 	if l.automationDone != nil {
 		<-l.automationDone
+	}
+	if l.executionDone != nil {
+		<-l.executionDone
 	}
 }
 

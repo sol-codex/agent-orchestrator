@@ -147,7 +147,7 @@ func (m *Service) List(ctx context.Context) ([]Summary, error) {
 		} else {
 			folderMissing = !exists
 		}
-		out = append(out, Summary{
+		summary := Summary{
 			ID:                domain.ProjectID(row.ID),
 			Name:              projectDisplayName(row),
 			Path:              row.Path,
@@ -155,7 +155,19 @@ func (m *Service) List(ctx context.Context) ([]Summary, error) {
 			SessionPrefix:     resolveSessionPrefix(row),
 			OrchestratorAgent: row.Config.Orchestrator.Harness,
 			FolderMissing:     folderMissing,
-		})
+		}
+		if reader, ok := m.store.(interface {
+			GetExternalCoordinator(context.Context, string) (domain.ExternalCoordinatorLease, bool, error)
+		}); ok {
+			lease, found, err := reader.GetExternalCoordinator(ctx, row.ID)
+			if err != nil {
+				return nil, apierr.Internal("EXTERNAL_COORDINATOR_READ_FAILED", "Failed to load external coordinator")
+			}
+			if found && lease.Active(m.clock()) {
+				summary.ExternalCoordinator = &lease
+			}
+		}
+		out = append(out, summary)
 	}
 	return out, nil
 }

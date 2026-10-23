@@ -155,6 +155,19 @@ beforeEach(() => {
 });
 
 describe("SessionsBoard", () => {
+	it("labels a registered external coordinator without presenting an AO orchestrator chat", () => {
+		workspaceQueryMock.mockReturnValue({ data: [{
+			id: "p1", name: "External", path: "/tmp/external", sessions: [],
+			externalCoordinator: {
+				ownerId: "codex-desktop", displayName: "Codex Desktop",
+				lastSeenAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+			},
+		}], isSuccess: true });
+		renderBoard("p1");
+		expect(screen.getByText(/Codex Desktop is coordinating this project outside AO/)).toBeInTheDocument();
+		expect(screen.queryByText("No orchestrator is running for this project.")).not.toBeInTheDocument();
+	});
+
 	it("shows the Cloud loader instead of Chat while a cloud orchestrator is starting", () => {
 		workspaceQueryMock.mockReturnValue({ data: [{ id: "p1", name: "Cloud project", kind: "cloud", path: "", sessions: [] }], isSuccess: true });
 		useUiStore.getState().setProjectProvisioning("p1", true);
