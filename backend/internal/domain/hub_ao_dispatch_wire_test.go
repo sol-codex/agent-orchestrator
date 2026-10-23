@@ -189,6 +189,20 @@ func TestHubAOWireUnicodeAndStrictShape(t *testing.T) {
 	}
 }
 
+func TestHubAOWireSurrogateScannerAfterEscapedQuote(t *testing.T) {
+	for _, raw := range [][]byte{
+		[]byte(`{"value":"escaped\"quote\ud800"}`),
+		[]byte(`{"value":"escaped\"quote\udc00"}`),
+	} {
+		if err := rejectUnpairedJSONSurrogates(raw); err == nil {
+			t.Fatalf("lone surrogate after escaped quote accepted: %s", raw)
+		}
+	}
+	if err := rejectUnpairedJSONSurrogates([]byte(`{"value":"escaped\"quote\ud83d\ude80"}`)); err != nil {
+		t.Fatalf("valid pair after escaped quote rejected: %v", err)
+	}
+}
+
 func TestHubAOWireIdentityDoesNotAuthenticateOrConsume(t *testing.T) {
 	fixture := loadHubAOWireFixture(t)
 	grant, err := ParseHubAOGrant(fixture.Grant)
