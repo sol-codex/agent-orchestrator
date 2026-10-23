@@ -20,9 +20,16 @@ import (
 // executionSessions binds one durable graph attempt to AO's existing idempotent
 // worker spawn. A session row is only adopted once its launch commit exists.
 type executionSessions struct {
-	store    executionSessionStore
-	sessions executionSessionSpawner
+	store      executionSessionStore
+	sessions   executionSessionSpawner
+	spawnFence executionSpawnFence
 }
+
+type executionSpawnFence interface {
+	CanSpawnExecutionAttempt(context.Context, string, string, string, string, string) (bool, error)
+}
+
+var errExecutionSpawnRefused = errors.New("execution spawn refused by durable attempt or Hub authority fence")
 
 type executionSessionStore interface {
 	GetSessionByClientRequestID(context.Context, string) (domain.SessionRecord, bool, error)
@@ -35,6 +42,16 @@ type executionSessionSpawner interface {
 }
 
 func (d executionSessions) Spawn(ctx context.Context, graph domain.ExecutionGraph, task domain.ExecutionTask, agent execution.Agent, attemptID string) (domain.SessionID, error) {
+	if d.spawnFence == nil {
+		return "", errExecutionSpawnRefused
+	}
+	allowed, err := d.spawnFence.CanSpawnExecutionAttempt(ctx, graph.ID, task.ID, attemptID, agent.ID, agent.Provider)
+	if err != nil {
+		return "", fmt.Errorf("execution spawn check: %w", err)
+	}
+	if !allowed {
+		return "", errExecutionSpawnRefused
+	}
 	prompt := executionTaskPrompt(graph, task)
 	hash := sha256.Sum256([]byte(prompt))
 	session, _, _, err := d.sessions.Spawn(ctx, ports.SpawnConfig{
@@ -153,7 +170,7 @@ func (executionReviewGate) Validate(context.Context, domain.ExecutionGraph, doma
 }
 
 func startExecution(ctx context.Context, sessionRecoveryDone <-chan struct{}, store *sqlite.Store, sessions executionSessionSpawner, agents executionReadiness, logger *slog.Logger) (*execution.Service, <-chan struct{}, error) {
-	svc, err := execution.New(store, executionSessions{store: store, sessions: sessions}, executionCapacity{agents: agents}, executionReviewGate{}, execution.Config{
+	svc, err := execution.New(store, executionSessions{store: store, sessions: sessions, spawnFence: store}, executionCapacity{agents: agents}, executionReviewGate{}, execution.Config{
 		Logger: logger, MaxConcurrent: 4, MaxPerProvider: map[string]int{}, MaxAttempts: execution.DefaultMaxAttempts,
 		SpawnLease: 2 * time.Minute, ReconcileInterval: 15 * time.Second,
 	})
