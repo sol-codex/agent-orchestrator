@@ -123,8 +123,8 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 // changed graph under the same ID conflicts. This method never emits a wake.
 func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, graph domain.ExecutionGraph) (domain.PreparedExecutionGraphReceipt, bool, error) {
 	var receipt domain.PreparedExecutionGraphReceipt
-	if prepareID == "" || strings.TrimSpace(prepareID) != prepareID {
-		return receipt, false, fmt.Errorf("prepare ID must be nonempty and trimmed")
+	if err := validatePrepareID(prepareID); err != nil {
+		return receipt, false, err
 	}
 	if err := domain.ValidateExecutionGraph(graph); err != nil {
 		return receipt, false, err
@@ -179,8 +179,12 @@ func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, gra
 		}
 		err = db.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE id=? OR prepare_id=?`, graph.ID, prepareID).Scan(&priorID, &priorGraphID, &priorProjectID, &priorDigest, &priorBody, &priorCreated)
 		if err == nil {
+			priorReceipt, err := verifiedPreparedReceipt(priorID, priorGraphID, priorProjectID, priorDigest, priorBody, priorCreated)
+			if err != nil {
+				return err
+			}
 			if priorID == prepareID && priorGraphID == graph.ID && priorProjectID == string(graph.ProjectID) && priorDigest == digest && priorBody == string(body) {
-				receipt = domain.PreparedExecutionGraphReceipt{PrepareID: priorID, GraphID: priorGraphID, ProjectID: domain.ProjectID(priorProjectID), GraphBytesSHA256: priorDigest, Status: "prepared", CreatedAt: priorCreated}
+				receipt = priorReceipt
 				return nil
 			}
 			return execution.ErrGraphConflict
@@ -208,21 +212,49 @@ func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, gra
 
 func (s *Store) GetPreparedExecutionGraph(ctx context.Context, id string, byGraphID bool) (domain.PreparedExecutionGraphReceipt, bool, error) {
 	var receipt domain.PreparedExecutionGraphReceipt
-	var projectID string
+	var projectID, graphJSON string
 	var column = "prepare_id"
 	if byGraphID {
 		column = "id"
 	}
-	err := s.readDB.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,created_at FROM prepared_execution_graphs WHERE `+column+`=?`, id).Scan(&receipt.PrepareID, &receipt.GraphID, &projectID, &receipt.GraphBytesSHA256, &receipt.CreatedAt)
+	err := s.readDB.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE `+column+`=?`, id).Scan(&receipt.PrepareID, &receipt.GraphID, &projectID, &receipt.GraphBytesSHA256, &graphJSON, &receipt.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return receipt, false, nil
 	}
 	if err != nil {
 		return receipt, false, err
 	}
-	receipt.ProjectID = domain.ProjectID(projectID)
-	receipt.Status = "prepared"
-	return receipt, true, nil
+	verified, err := verifiedPreparedReceipt(receipt.PrepareID, receipt.GraphID, projectID, receipt.GraphBytesSHA256, graphJSON, receipt.CreatedAt)
+	if err != nil {
+		return receipt, false, err
+	}
+	return verified, true, nil
+}
+
+func validatePrepareID(id string) error {
+	if id == "" || len(id) > 128 || strings.TrimSpace(id) != id || strings.ContainsAny(id, "/?#") {
+		return fmt.Errorf("prepare ID must be a trimmed path-safe value of at most 128 bytes")
+	}
+	return nil
+}
+
+// verifiedPreparedReceipt refuses a positive receipt if persisted bytes no
+// longer match their full-graph digest or the row's graph/project identity.
+func verifiedPreparedReceipt(prepareID, graphID, projectID, digest, graphJSON string, createdAt time.Time) (domain.PreparedExecutionGraphReceipt, error) {
+	var receipt domain.PreparedExecutionGraphReceipt
+	var graph domain.ExecutionGraph
+	if err := json.Unmarshal([]byte(graphJSON), &graph); err != nil {
+		return receipt, fmt.Errorf("prepared graph %q corrupt JSON: %w", graphID, err)
+	}
+	canonical, err := json.Marshal(graph)
+	if err != nil {
+		return receipt, fmt.Errorf("prepared graph %q cannot encode: %w", graphID, err)
+	}
+	hash := sha256.Sum256(canonical)
+	if string(canonical) != graphJSON || hex.EncodeToString(hash[:]) != digest || graph.ID != graphID || string(graph.ProjectID) != projectID {
+		return receipt, fmt.Errorf("prepared graph %q failed stored-byte integrity check", graphID)
+	}
+	return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graphID, ProjectID: domain.ProjectID(projectID), GraphBytesSHA256: digest, Status: "prepared", CreatedAt: createdAt}, nil
 }
 
 func runtimeState(state domain.TaskState) bool {

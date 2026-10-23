@@ -3,9 +3,11 @@ package store_test
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -138,6 +140,56 @@ func TestPreparedExecutionGraphIsInertAcrossStoreReopen(t *testing.T) {
 		At: time.Now().UTC(), LeaseExpiresAt: time.Now().UTC().Add(time.Minute),
 	}); err != nil || claimed {
 		t.Fatalf("prepared task claimed after restart: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestPreparedExecutionGraphReceiptRejectsCorruptStoredBytes(t *testing.T) {
+	dataDir := t.TempDir()
+	s, err := sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedProject(t, s, "project")
+	ctx := context.Background()
+	graph := testGraph("prepared-corrupt", "project", graphTask("ready", domain.TaskReady))
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-corrupt", graph); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dataDir, "ao.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := graph
+	changed.Objective = "Tampered after prepare"
+	bytes, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE prepared_execution_graphs SET graph_json=? WHERE prepare_id=?`, string(bytes), "prep-corrupt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	for _, byGraphID := range []bool{false, true} {
+		id := "prep-corrupt"
+		if byGraphID {
+			id = graph.ID
+		}
+		if got, found, err := s.GetPreparedExecutionGraph(ctx, id, byGraphID); err == nil || found {
+			t.Fatalf("corrupt receipt returned byGraphID=%v got=%#v found=%v err=%v", byGraphID, got, found, err)
+		}
+	}
+	if got, created, err := s.PrepareExecutionGraph(ctx, "prep-corrupt", changed); err == nil || created {
+		t.Fatalf("corrupt retry returned got=%#v created=%v err=%v", got, created, err)
 	}
 }
 

@@ -66,8 +66,8 @@ func (c *ExecutionGraphsController) prepare(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	graph := request.Graph
-	if request.PrepareID == "" || strings.TrimSpace(request.PrepareID) != request.PrepareID {
-		graphBadRequest(w, r, "A stable trimmed prepareId is required")
+	if request.PrepareID == "" || len(request.PrepareID) > 128 || strings.TrimSpace(request.PrepareID) != request.PrepareID || strings.ContainsAny(request.PrepareID, "/?#") {
+		graphBadRequest(w, r, "A stable trimmed, path-safe prepareId of at most 128 bytes is required")
 		return
 	}
 	if graph.Revision != 1 {

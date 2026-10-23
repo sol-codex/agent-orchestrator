@@ -299,6 +299,18 @@ func TestPrepareExecutionGraphNeverWakesAndRetriesIdempotently(t *testing.T) {
 	}
 }
 
+func TestPrepareExecutionGraphRequiresBoundedID(t *testing.T) {
+	store := &fakeExecutionGraphStore{}
+	router := executionGraphTestRouter(store, nil)
+	for _, id := range []string{"", strings.Repeat("x", 129), "bad/path"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, requestJSON(t, http.MethodPost, "/execution-graphs/prepared", PrepareExecutionGraphRequest{PrepareID: id, Graph: executionGraphFixture()}))
+		if rec.Code != http.StatusBadRequest || len(store.prepared) != 0 {
+			t.Fatalf("prepare ID %q status=%d body=%s", id, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestExecutionGraphImportRejectsBadPlanAndJSON(t *testing.T) {
 	store := &fakeExecutionGraphStore{}
 	wakes := 0
