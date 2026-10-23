@@ -7,8 +7,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
 )
 
 func testEnrollment() *Enrollment {
@@ -118,5 +124,53 @@ func TestInvalidEnrollmentAndBindFailureFailClosed(t *testing.T) {
 	enabled, err = start(context.Background(), "ignored", testEnrollment(), listen)
 	if enabled || err == nil || !called {
 		t.Fatalf("bind failure enabled=%v err=%v called=%v", enabled, err, called)
+	}
+}
+
+func TestHubStatusAbsentFromOrdinaryLoopbackRouter(t *testing.T) {
+	// The LAN listener wraps this same router, while the pipe serves Handler
+	// directly. No Hub control route is registered on the shared HTTP surface.
+	router := httpd.NewRouterWithControl(config.Config{}, nil, nil, httpd.APIDeps{}, httpd.ControlDeps{})
+	for _, path := range []string{"/v1/status", "/api/v1/hub-control/status", "/api/v1/hub-control/activate"} {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("shared router path %s status %d, want 404", path, w.Code)
+		}
+	}
+}
+
+func TestHubStatusAbsentFromAuthenticatedLAN(t *testing.T) {
+	shared := httpd.NewRouterWithControl(config.Config{}, nil, nil, httpd.APIDeps{}, httpd.ControlDeps{})
+	lan := httpd.NewMobileLAN(shared, "host-A", 0, nil, nil)
+	lan.SetPasswordHash(mobilebridge.HashPassword("test-mobile-password"))
+	port, err := lan.StartLoopback(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := lan.Stop(ctx); err != nil {
+			t.Error(err)
+		}
+	}()
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	defer client.CloseIdleConnections()
+	for _, path := range []string{"/v1/status", "/api/v1/hub-control/status", "/api/v1/hub-control/activate"} {
+		req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer test-mobile-password")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("LAN path %s status %d, want 404", path, resp.StatusCode)
+		}
 	}
 }
