@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +46,14 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 	}
 	defer s.writeMu.Unlock()
 	return s.inTxDB(ctx, "save execution graph", func(_ *gen.Queries, db gen.DBTX) error {
+		var preparedID string
+		err := db.QueryRowContext(ctx, `SELECT id FROM prepared_execution_graphs WHERE id=?`, graph.ID).Scan(&preparedID)
+		if err == nil {
+			return execution.ErrGraphConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		old, found, err := readExecutionGraph(ctx, db, graph.ID)
 		if err != nil {
 			return err
@@ -106,6 +116,168 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 		}
 		return writeExecutionGraph(ctx, db, old, graph, time.Now().UTC())
 	})
+}
+
+// PrepareExecutionGraph stores a validated plan outside the scheduler's active
+// graph table. Identical canonical graph bytes are an idempotent retry; any
+// changed graph under the same ID conflicts. This method never emits a wake.
+func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, graph domain.ExecutionGraph) (domain.PreparedExecutionGraphReceipt, bool, error) {
+	var receipt domain.PreparedExecutionGraphReceipt
+	if err := validatePrepareID(prepareID); err != nil {
+		return receipt, false, err
+	}
+	if err := domain.ValidateExecutionGraph(graph); err != nil {
+		return receipt, false, err
+	}
+	if err := execution.ValidateSupportedAgentContract(graph); err != nil {
+		return receipt, false, err
+	}
+	if graph.Revision != 1 {
+		return receipt, false, execution.ErrGraphConflict
+	}
+	for _, task := range graph.Tasks {
+		if task.Assignment != nil || len(task.Attempts) != 0 || len(task.Reviews) != 0 || runtimeState(task.State) {
+			return receipt, false, execution.ErrGraphRuntimeFacts
+		}
+		seen := make(map[string]struct{}, len(task.Resources))
+		for _, resource := range task.Resources {
+			key := canonicalResource(resource)
+			if _, exists := seen[key]; exists {
+				return receipt, false, fmt.Errorf("task %q: resource aliases collide at %q", task.ID, key)
+			}
+			seen[key] = struct{}{}
+		}
+	}
+	body, err := json.Marshal(graph)
+	if err != nil {
+		return receipt, false, err
+	}
+	digestBytes := sha256.Sum256(body)
+	digest := hex.EncodeToString(digestBytes[:])
+	if err := s.writeMu.LockContext(ctx); err != nil {
+		return receipt, false, err
+	}
+	defer s.writeMu.Unlock()
+	created := false
+	err = s.inTxDB(ctx, "prepare execution graph", func(_ *gen.Queries, db gen.DBTX) error {
+		var activeID string
+		err := db.QueryRowContext(ctx, `SELECT id FROM execution_graphs WHERE id=?`, graph.ID).Scan(&activeID)
+		if err == nil {
+			return execution.ErrGraphConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var priorID, priorGraphID, priorProjectID, priorDigest, priorReceiptDigest, priorBody string
+		var priorCreated time.Time
+		var matchingRows int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM prepared_execution_graphs WHERE id=? OR prepare_id=?`, graph.ID, prepareID).Scan(&matchingRows); err != nil {
+			return err
+		}
+		if matchingRows > 1 {
+			return execution.ErrGraphConflict
+		}
+		err = db.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,receipt_identity_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE id=? OR prepare_id=?`, graph.ID, prepareID).Scan(&priorID, &priorGraphID, &priorProjectID, &priorDigest, &priorReceiptDigest, &priorBody, &priorCreated)
+		if err == nil {
+			priorReceipt, err := verifiedPreparedReceipt(priorID, priorGraphID, priorProjectID, priorDigest, priorReceiptDigest, priorBody, priorCreated)
+			if err != nil {
+				return err
+			}
+			if priorID == prepareID && priorGraphID == graph.ID && priorProjectID == string(graph.ProjectID) && priorDigest == digest && priorBody == string(body) {
+				receipt = priorReceipt
+				return nil
+			}
+			return execution.ErrGraphConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var projectID string
+		if err := db.QueryRowContext(ctx, `SELECT id FROM projects WHERE id=?`, string(graph.ProjectID)).Scan(&projectID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return execution.ErrGraphProjectNotFound
+			}
+			return err
+		}
+		now := time.Now().UTC()
+		receiptDigest, err := preparedReceiptIdentityDigest(prepareID, graph.ID, string(graph.ProjectID), digest, now)
+		if err != nil {
+			return err
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO prepared_execution_graphs(id,project_id,graph_json,created_at,prepare_id,graph_bytes_sha256,receipt_identity_sha256) VALUES(?,?,?,?,?,?,?)`, graph.ID, string(graph.ProjectID), string(body), now, prepareID, digest, receiptDigest); err != nil {
+			return err
+		}
+		receipt = domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, GraphBytesSHA256: digest, ReceiptIdentitySHA256: receiptDigest, Status: "prepared", CreatedAt: now}
+		created = true
+		return nil
+	})
+	return receipt, created, err
+}
+
+func (s *Store) GetPreparedExecutionGraph(ctx context.Context, id string, byGraphID bool) (domain.PreparedExecutionGraphReceipt, bool, error) {
+	var receipt domain.PreparedExecutionGraphReceipt
+	var projectID, graphJSON, receiptDigest string
+	var column = "prepare_id"
+	if byGraphID {
+		column = "id"
+	}
+	err := s.readDB.QueryRowContext(ctx, `SELECT prepare_id,id,project_id,graph_bytes_sha256,receipt_identity_sha256,graph_json,created_at FROM prepared_execution_graphs WHERE `+column+`=?`, id).Scan(&receipt.PrepareID, &receipt.GraphID, &projectID, &receipt.GraphBytesSHA256, &receiptDigest, &graphJSON, &receipt.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return receipt, false, nil
+	}
+	if err != nil {
+		return receipt, false, err
+	}
+	verified, err := verifiedPreparedReceipt(receipt.PrepareID, receipt.GraphID, projectID, receipt.GraphBytesSHA256, receiptDigest, graphJSON, receipt.CreatedAt)
+	if err != nil {
+		return receipt, false, err
+	}
+	return verified, true, nil
+}
+
+func validatePrepareID(id string) error {
+	if id == "" || len(id) > 128 || strings.TrimSpace(id) != id || strings.ContainsAny(id, "/?#") {
+		return fmt.Errorf("prepare ID must be a trimmed path-safe value of at most 128 bytes")
+	}
+	return nil
+}
+
+// verifiedPreparedReceipt refuses a positive receipt if persisted bytes no
+// longer match their full-graph digest or the row's graph/project identity.
+func verifiedPreparedReceipt(prepareID, graphID, projectID, digest, receiptDigest, graphJSON string, createdAt time.Time) (domain.PreparedExecutionGraphReceipt, error) {
+	var receipt domain.PreparedExecutionGraphReceipt
+	if err := validatePrepareID(prepareID); err != nil {
+		return receipt, fmt.Errorf("prepared graph %q has invalid prepare ID: %w", graphID, err)
+	}
+	expectedReceiptDigest, err := preparedReceiptIdentityDigest(prepareID, graphID, projectID, digest, createdAt)
+	if err != nil || receiptDigest != expectedReceiptDigest {
+		return receipt, fmt.Errorf("prepared graph %q failed receipt identity check", graphID)
+	}
+	var graph domain.ExecutionGraph
+	if err := json.Unmarshal([]byte(graphJSON), &graph); err != nil {
+		return receipt, fmt.Errorf("prepared graph %q corrupt JSON: %w", graphID, err)
+	}
+	canonical, err := json.Marshal(graph)
+	if err != nil {
+		return receipt, fmt.Errorf("prepared graph %q cannot encode: %w", graphID, err)
+	}
+	hash := sha256.Sum256(canonical)
+	if string(canonical) != graphJSON || hex.EncodeToString(hash[:]) != digest || graph.ID != graphID || string(graph.ProjectID) != projectID {
+		return receipt, fmt.Errorf("prepared graph %q failed stored-byte integrity check", graphID)
+	}
+	return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graphID, ProjectID: domain.ProjectID(projectID), GraphBytesSHA256: digest, ReceiptIdentitySHA256: receiptDigest, Status: "prepared", CreatedAt: createdAt}, nil
+}
+
+func preparedReceiptIdentityDigest(prepareID, graphID, projectID, graphDigest string, createdAt time.Time) (string, error) {
+	if createdAt.IsZero() || createdAt.Year() < 2000 || createdAt.Year() > 9999 {
+		return "", errors.New("prepared receipt creation time is out of bounds")
+	}
+	payload, err := json.Marshal([]string{"ao.prepared-receipt/1", prepareID, graphID, projectID, graphDigest, createdAt.UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(payload)
+	return hex.EncodeToString(hash[:]), nil
 }
 
 func runtimeState(state domain.TaskState) bool {

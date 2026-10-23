@@ -2,7 +2,12 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -62,6 +67,210 @@ func TestExecutionGraphImportRejectsUnknownProject(t *testing.T) {
 	err := s.SaveExecutionGraph(context.Background(), testGraph("g-missing", "missing-project", graphTask("t", domain.TaskPending)))
 	if !errors.Is(err, execution.ErrGraphProjectNotFound) {
 		t.Fatalf("unknown project error = %v, want ErrGraphProjectNotFound", err)
+	}
+}
+
+func TestPreparedExecutionGraphIsInertAcrossStoreReopen(t *testing.T) {
+	dataDir := t.TempDir()
+	s, err := sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedProject(t, s, "project")
+	ctx := context.Background()
+	graph := testGraph("prepared", "project", graphTask("ready", domain.TaskReady, "src/ready.go"))
+	receipt, created, err := s.PrepareExecutionGraph(ctx, "prep-1", graph)
+	if err != nil || !created {
+		t.Fatalf("prepare created=%v err=%v", created, err)
+	}
+	retryReceipt, created, err := s.PrepareExecutionGraph(ctx, "prep-1", graph)
+	if err != nil || created {
+		t.Fatalf("retry created=%v err=%v", created, err)
+	}
+	if receipt != retryReceipt || receipt.GraphBytesSHA256 == "" || receipt.ReceiptIdentitySHA256 == "" || receipt.Status != "prepared" {
+		t.Fatalf("unstable receipt: %#v %#v", receipt, retryReceipt)
+	}
+	identityBytes, err := json.Marshal([]string{"ao.prepared-receipt/1", receipt.PrepareID, receipt.GraphID, string(receipt.ProjectID), receipt.GraphBytesSHA256, receipt.CreatedAt.UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityHash := sha256.Sum256(identityBytes)
+	expectedReceiptDigest := hex.EncodeToString(identityHash[:])
+	if receipt.ReceiptIdentitySHA256 != expectedReceiptDigest {
+		t.Fatalf("public receipt identity digest=%s err=%v", receipt.ReceiptIdentitySHA256, err)
+	}
+	fullGraphBytes, err := json.Marshal(graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullGraphHash := sha256.Sum256(fullGraphBytes)
+	if receipt.GraphBytesSHA256 != hex.EncodeToString(fullGraphHash[:]) {
+		t.Fatalf("full graph digest=%s", receipt.GraphBytesSHA256)
+	}
+	changed := graph
+	changed.Objective = "Other objective"
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-1", changed); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("changed bytes err=%v, want conflict", err)
+	}
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-2", graph); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("changed prepare ID err=%v, want conflict", err)
+	}
+	other := graph
+	other.ID = "different-graph"
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-1", other); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("reused prepare ID err=%v, want conflict", err)
+	}
+	if err := s.SaveExecutionGraph(ctx, graph); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("legacy import of reserved ID err=%v, want conflict", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if got, found, err := s.GetPreparedExecutionGraph(ctx, "prep-1", false); err != nil || !found || got != receipt {
+		t.Fatalf("prepare receipt after restart: got=%#v found=%v err=%v", got, found, err)
+	}
+	if got, found, err := s.GetPreparedExecutionGraph(ctx, graph.ID, true); err != nil || !found || got != receipt {
+		t.Fatalf("graph receipt after restart: got=%#v found=%v err=%v", got, found, err)
+	}
+	if _, found, err := s.GetExecutionGraph(ctx, graph.ID); err != nil || found {
+		t.Fatalf("prepared graph visible through active GET: found=%v err=%v", found, err)
+	}
+	if active, err := s.ListActiveGraphs(ctx); err != nil || len(active) != 0 {
+		t.Fatalf("prepared graph visible to scheduler: active=%v err=%v", active, err)
+	}
+	if claimed, err := s.ClaimTask(ctx, execution.Claim{
+		GraphID: graph.ID, TaskID: "ready", AttemptID: "must-not-start", AgentID: "worker", Provider: "codex",
+		ContractFingerprint: "unreachable", Resources: []string{"src/ready.go"},
+		At: time.Now().UTC(), LeaseExpiresAt: time.Now().UTC().Add(time.Minute),
+	}); err != nil || claimed {
+		t.Fatalf("prepared task claimed after restart: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestPreparedExecutionGraphReceiptRejectsCorruptStoredBytes(t *testing.T) {
+	dataDir := t.TempDir()
+	s, err := sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedProject(t, s, "project")
+	ctx := context.Background()
+	graph := testGraph("prepared-corrupt", "project", graphTask("ready", domain.TaskReady))
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-corrupt", graph); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dataDir, "ao.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := graph
+	changed.Objective = "Tampered after prepare"
+	bytes, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE prepared_execution_graphs SET graph_json=? WHERE prepare_id=?`, string(bytes), "prep-corrupt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	for _, byGraphID := range []bool{false, true} {
+		id := "prep-corrupt"
+		if byGraphID {
+			id = graph.ID
+		}
+		if got, found, err := s.GetPreparedExecutionGraph(ctx, id, byGraphID); err == nil || found {
+			t.Fatalf("corrupt receipt returned byGraphID=%v got=%#v found=%v err=%v", byGraphID, got, found, err)
+		}
+	}
+	if got, created, err := s.PrepareExecutionGraph(ctx, "prep-corrupt", changed); err == nil || created {
+		t.Fatalf("corrupt retry returned got=%#v created=%v err=%v", got, created, err)
+	}
+}
+
+func TestPreparedExecutionGraphReceiptRejectsCorruptMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name, column, lookupID string
+		value                  any
+	}{
+		{name: "prepare ID", column: "prepare_id", lookupID: "prep-forged", value: "prep-forged"},
+		{name: "creation time", column: "created_at", lookupID: "prep-original", value: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "receipt digest", column: "receipt_identity_sha256", lookupID: "prep-original", value: strings.Repeat("9", 64)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			s, err := sqlite.Open(dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedProject(t, s, "project")
+			ctx := context.Background()
+			graph := testGraph("prepared-metadata", "project", graphTask("ready", domain.TaskReady))
+			if _, _, err := s.PrepareExecutionGraph(ctx, "prep-original", graph); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dataDir, "ao.db")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			statement := `UPDATE prepared_execution_graphs SET ` + tc.column + `=? WHERE id=?`
+			if _, err := db.ExecContext(ctx, statement, tc.value, graph.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s, err = sqlite.Open(dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = s.Close() }()
+			for _, lookup := range []struct {
+				id        string
+				byGraphID bool
+			}{{tc.lookupID, false}, {graph.ID, true}} {
+				if got, found, err := s.GetPreparedExecutionGraph(ctx, lookup.id, lookup.byGraphID); err == nil || found {
+					t.Fatalf("corrupt metadata returned positive receipt: got=%#v found=%v err=%v", got, found, err)
+				}
+			}
+			if got, created, err := s.PrepareExecutionGraph(ctx, "prep-original", graph); err == nil || created {
+				t.Fatalf("corrupt metadata retry returned got=%#v created=%v err=%v", got, created, err)
+			}
+		})
+	}
+}
+
+func TestPrepareExecutionGraphRejectsRuntimeFactsAndActiveID(t *testing.T) {
+	s := newTestStore(t)
+	seedProject(t, s, "project")
+	ctx := context.Background()
+	active := testGraph("active", "project", graphTask("task", domain.TaskReady))
+	if err := s.SaveExecutionGraph(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-active", active); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("prepare active ID err=%v, want conflict", err)
+	}
+	withRuntime := testGraph("runtime", "project", graphTask("task", domain.TaskRunning))
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-runtime", withRuntime); err == nil {
+		t.Fatal("prepare accepted an active task without valid runtime facts")
 	}
 }
 

@@ -3072,6 +3072,57 @@ paths:
       summary: Save the next graph revision
       tags:
       - execution-graphs
+  /api/v1/execution-graphs/{graphId}/preparation:
+    get:
+      operationId: getPreparedExecutionGraphByGraphID
+      parameters:
+      - description: Stable execution graph identifier.
+        in: path
+        name: graphId
+        required: true
+        schema:
+          description: Stable execution graph identifier.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersPreparedExecutionGraphEnvelope'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Look up an inert prepare receipt by graph ID
+      tags:
+      - execution-graphs
   /api/v1/execution-graphs/{graphId}/reconcile:
     post:
       operationId: reconcileExecutionGraph
@@ -3285,6 +3336,112 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Release a blocked task after its dependencies are complete
+      tags:
+      - execution-graphs
+  /api/v1/execution-graphs/prepared:
+    post:
+      operationId: prepareExecutionGraph
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersPrepareExecutionGraphRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersPreparedExecutionGraphEnvelope'
+          description: OK
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersPreparedExecutionGraphEnvelope'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Persist an inert full execution graph with a stable prepare ID
+      tags:
+      - execution-graphs
+  /api/v1/execution-graphs/prepared/{prepareId}:
+    get:
+      operationId: getPreparedExecutionGraph
+      parameters:
+      - description: Stable prepare identifier.
+        in: path
+        name: prepareId
+        required: true
+        schema:
+          description: Stable prepare identifier.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersPreparedExecutionGraphEnvelope'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Look up an inert prepare receipt by prepare ID
       tags:
       - execution-graphs
   /api/v1/fs/dirs:
@@ -15480,6 +15637,23 @@ components:
         deleteArtifacts:
           type: boolean
       type: object
+    ControllersPrepareExecutionGraphRequest:
+      properties:
+        graph:
+          $ref: '#/components/schemas/ExecutionGraph'
+        prepareId:
+          type: string
+      required:
+      - prepareId
+      - graph
+      type: object
+    ControllersPreparedExecutionGraphEnvelope:
+      properties:
+        receipt:
+          $ref: '#/components/schemas/DomainPreparedExecutionGraphReceipt'
+      required:
+      - receipt
+      type: object
     ControllersRemoteHostAccountTokenResponse:
       properties:
         hostId:
@@ -16937,6 +17111,32 @@ components:
       required:
       - state
       - lastActivityAt
+      type: object
+    DomainPreparedExecutionGraphReceipt:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        graphBytesSha256:
+          type: string
+        graphId:
+          type: string
+        prepareId:
+          type: string
+        projectId:
+          type: string
+        receiptIdentitySha256:
+          type: string
+        status:
+          type: string
+      required:
+      - prepareId
+      - graphId
+      - projectId
+      - graphBytesSha256
+      - receiptIdentitySha256
+      - status
+      - createdAt
       type: object
     DomainReviewerConfig:
       properties:

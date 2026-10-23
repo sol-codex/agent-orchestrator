@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,8 @@ import (
 
 type fakeExecutionGraphStore struct {
 	graphs      map[string]domain.ExecutionGraph
+	prepared    map[string]domain.ExecutionGraph
+	prepareIDs  map[string]string
 	saveErr     error
 	getErr      error
 	listErr     error
@@ -31,6 +34,50 @@ type fakeExecutionGraphStore struct {
 	cancelCalls int
 	reviewed    execution.ReviewDecision
 	evidence    domain.TaskReviewRecord
+}
+
+func (f *fakeExecutionGraphStore) PrepareExecutionGraph(_ context.Context, prepareID string, graph domain.ExecutionGraph) (domain.PreparedExecutionGraphReceipt, bool, error) {
+	receipt := domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, ReceiptIdentitySHA256: strings.Repeat("8", 64), Status: "prepared"}
+	if f.saveErr != nil {
+		return receipt, false, f.saveErr
+	}
+	if _, active := f.graphs[graph.ID]; active {
+		return receipt, false, execution.ErrGraphConflict
+	}
+	if existing, used := f.prepareIDs[prepareID]; used && existing != graph.ID {
+		return receipt, false, execution.ErrGraphConflict
+	}
+	if previous, exists := f.prepared[graph.ID]; exists {
+		if !reflect.DeepEqual(previous, graph) || f.prepareIDs[prepareID] != graph.ID {
+			return receipt, false, execution.ErrGraphConflict
+		}
+		return receipt, false, nil
+	}
+	if f.prepared == nil {
+		f.prepared = make(map[string]domain.ExecutionGraph)
+	}
+	f.prepared[graph.ID] = graph
+	if f.prepareIDs == nil {
+		f.prepareIDs = make(map[string]string)
+	}
+	f.prepareIDs[prepareID] = graph.ID
+	return receipt, true, nil
+}
+
+func (f *fakeExecutionGraphStore) GetPreparedExecutionGraph(_ context.Context, id string, byGraphID bool) (domain.PreparedExecutionGraphReceipt, bool, error) {
+	if !byGraphID {
+		id = f.prepareIDs[id]
+	}
+	graph, found := f.prepared[id]
+	if !found {
+		return domain.PreparedExecutionGraphReceipt{}, false, nil
+	}
+	for prepareID, graphID := range f.prepareIDs {
+		if graphID == id {
+			return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, ReceiptIdentitySHA256: strings.Repeat("8", 64), Status: "prepared"}, true, nil
+		}
+	}
+	return domain.PreparedExecutionGraphReceipt{}, false, nil
 }
 
 func (f *fakeExecutionGraphStore) SaveExecutionGraph(_ context.Context, graph domain.ExecutionGraph) error {
@@ -212,6 +259,54 @@ func TestExecutionGraphImportReadAndList(t *testing.T) {
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
 		if rec.Code != tc.code {
 			t.Fatalf("GET %s status=%d body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestPrepareExecutionGraphNeverWakesAndRetriesIdempotently(t *testing.T) {
+	store := &fakeExecutionGraphStore{}
+	wakes := 0
+	router := executionGraphTestRouter(store, func() { wakes++ })
+	graph := executionGraphFixture()
+	for i, want := range []int{http.StatusCreated, http.StatusOK} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, requestJSON(t, http.MethodPost, "/execution-graphs/prepared", PrepareExecutionGraphRequest{PrepareID: "prep-1", Graph: graph}))
+		if rec.Code != want || wakes != 0 || len(store.graphs) != 0 || len(store.prepared) != 1 {
+			t.Fatalf("prepare %d status=%d wakes=%d active=%d prepared=%d body=%s", i, rec.Code, wakes, len(store.graphs), len(store.prepared), rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"prepareId":"prep-1"`) || !strings.Contains(rec.Body.String(), `"receiptIdentitySha256":"`+strings.Repeat("8", 64)+`"`) || !strings.Contains(rec.Body.String(), `"status":"prepared"`) {
+			t.Fatalf("prepare receipt missing: %s", rec.Body.String())
+		}
+	}
+	for _, path := range []string{"/execution-graphs/prepared/prep-1", "/execution-graphs/" + graph.ID + "/preparation"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, requestJSON(t, http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"prepareId":"prep-1"`) || !strings.Contains(rec.Body.String(), `"receiptIdentitySha256":"`+strings.Repeat("8", 64)+`"`) {
+			t.Fatalf("lookup %s: status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+	changed := graph
+	changed.Objective = "Changed objective"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, requestJSON(t, http.MethodPost, "/execution-graphs/prepared", PrepareExecutionGraphRequest{PrepareID: "prep-1", Graph: changed}))
+	if rec.Code != http.StatusConflict || wakes != 0 {
+		t.Fatalf("changed prepare status=%d wakes=%d body=%s", rec.Code, wakes, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, requestJSON(t, http.MethodGet, "/execution-graphs", nil))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), graph.ID) {
+		t.Fatalf("prepared graph appeared in active listing: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPrepareExecutionGraphRequiresBoundedID(t *testing.T) {
+	store := &fakeExecutionGraphStore{}
+	router := executionGraphTestRouter(store, nil)
+	for _, id := range []string{"", strings.Repeat("x", 129), "bad/path"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, requestJSON(t, http.MethodPost, "/execution-graphs/prepared", PrepareExecutionGraphRequest{PrepareID: id, Graph: executionGraphFixture()}))
+		if rec.Code != http.StatusBadRequest || len(store.prepared) != 0 {
+			t.Fatalf("prepare ID %q status=%d body=%s", id, rec.Code, rec.Body.String())
 		}
 	}
 }
