@@ -22,6 +22,7 @@ import (
 // request shape and wakes the scheduler after a successful write.
 type ExecutionGraphStore interface {
 	SaveExecutionGraph(context.Context, domain.ExecutionGraph) error
+	PrepareExecutionGraph(context.Context, domain.ExecutionGraph) (bool, error)
 	GetExecutionGraph(context.Context, string) (domain.ExecutionGraph, bool, error)
 	ListActiveGraphs(context.Context) ([]domain.ExecutionGraph, error)
 	ResolveReview(context.Context, string, string, string, execution.ReviewDecision, time.Time) (bool, error)
@@ -39,6 +40,7 @@ type ExecutionGraphsController struct {
 
 func (c *ExecutionGraphsController) Register(r chi.Router) {
 	r.Get("/execution-graphs", c.list)
+	r.Post("/execution-graphs/prepared", c.prepare)
 	r.Post("/execution-graphs", c.create)
 	r.Get("/execution-graphs/{graphId}", c.get)
 	r.Put("/execution-graphs/{graphId}", c.update)
@@ -46,6 +48,41 @@ func (c *ExecutionGraphsController) Register(r chi.Router) {
 	r.Post("/execution-graphs/{graphId}/tasks/{taskId}/review", c.review)
 	r.Post("/execution-graphs/{graphId}/tasks/{taskId}/unblock", c.unblock)
 	r.Post("/execution-graphs/{graphId}/tasks/{taskId}/cancel", c.cancel)
+}
+
+// prepare persists an inert graph. It deliberately never calls wake: no
+// scheduler path may see this record until a separately authorized activation.
+func (c *ExecutionGraphsController) prepare(w http.ResponseWriter, r *http.Request) {
+	if c.Store == nil {
+		apispec.NotImplemented(w, r, http.MethodPost, "/api/v1/execution-graphs/prepared")
+		return
+	}
+	var graph domain.ExecutionGraph
+	if !decodeGraphRequest(w, r, &graph) {
+		return
+	}
+	if graph.Revision != 1 {
+		graphBadRequest(w, r, "A prepared execution graph must start at revision 1")
+		return
+	}
+	if err := domain.ValidateExecutionGraph(graph); err != nil {
+		graphBadRequest(w, r, err.Error())
+		return
+	}
+	if err := execution.ValidateSupportedAgentContract(graph); err != nil {
+		graphBadRequest(w, r, err.Error())
+		return
+	}
+	created, err := c.Store.PrepareExecutionGraph(r.Context(), graph)
+	if err != nil {
+		graphWriteError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	envelope.WriteJSON(w, status, ExecutionGraphEnvelope{Graph: graph})
 }
 
 func (c *ExecutionGraphsController) create(w http.ResponseWriter, r *http.Request) {

@@ -44,6 +44,14 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 	}
 	defer s.writeMu.Unlock()
 	return s.inTxDB(ctx, "save execution graph", func(_ *gen.Queries, db gen.DBTX) error {
+		var preparedID string
+		err := db.QueryRowContext(ctx, `SELECT id FROM prepared_execution_graphs WHERE id=?`, graph.ID).Scan(&preparedID)
+		if err == nil {
+			return execution.ErrGraphConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		old, found, err := readExecutionGraph(ctx, db, graph.ID)
 		if err != nil {
 			return err
@@ -106,6 +114,77 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 		}
 		return writeExecutionGraph(ctx, db, old, graph, time.Now().UTC())
 	})
+}
+
+// PrepareExecutionGraph stores a validated plan outside the scheduler's active
+// graph table. Identical canonical graph bytes are an idempotent retry; any
+// changed graph under the same ID conflicts. This method never emits a wake.
+func (s *Store) PrepareExecutionGraph(ctx context.Context, graph domain.ExecutionGraph) (bool, error) {
+	if err := domain.ValidateExecutionGraph(graph); err != nil {
+		return false, err
+	}
+	if err := execution.ValidateSupportedAgentContract(graph); err != nil {
+		return false, err
+	}
+	if graph.Revision != 1 {
+		return false, execution.ErrGraphConflict
+	}
+	for _, task := range graph.Tasks {
+		if task.Assignment != nil || len(task.Attempts) != 0 || len(task.Reviews) != 0 || runtimeState(task.State) {
+			return false, execution.ErrGraphRuntimeFacts
+		}
+		seen := make(map[string]struct{}, len(task.Resources))
+		for _, resource := range task.Resources {
+			key := canonicalResource(resource)
+			if _, exists := seen[key]; exists {
+				return false, fmt.Errorf("task %q: resource aliases collide at %q", task.ID, key)
+			}
+			seen[key] = struct{}{}
+		}
+	}
+	body, err := json.Marshal(graph)
+	if err != nil {
+		return false, err
+	}
+	if err := s.writeMu.LockContext(ctx); err != nil {
+		return false, err
+	}
+	defer s.writeMu.Unlock()
+	created := false
+	err = s.inTxDB(ctx, "prepare execution graph", func(_ *gen.Queries, db gen.DBTX) error {
+		var activeID string
+		err := db.QueryRowContext(ctx, `SELECT id FROM execution_graphs WHERE id=?`, graph.ID).Scan(&activeID)
+		if err == nil {
+			return execution.ErrGraphConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var prior string
+		err = db.QueryRowContext(ctx, `SELECT graph_json FROM prepared_execution_graphs WHERE id=?`, graph.ID).Scan(&prior)
+		if err == nil {
+			if prior == string(body) {
+				return nil
+			}
+			return execution.ErrGraphConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var projectID string
+		if err := db.QueryRowContext(ctx, `SELECT id FROM projects WHERE id=?`, string(graph.ProjectID)).Scan(&projectID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return execution.ErrGraphProjectNotFound
+			}
+			return err
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO prepared_execution_graphs(id,project_id,graph_json,created_at) VALUES(?,?,?,?)`, graph.ID, string(graph.ProjectID), string(body), time.Now().UTC()); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	return created, err
 }
 
 func runtimeState(state domain.TaskState) bool {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 
 type fakeExecutionGraphStore struct {
 	graphs      map[string]domain.ExecutionGraph
+	prepared    map[string]domain.ExecutionGraph
 	saveErr     error
 	getErr      error
 	listErr     error
@@ -31,6 +33,26 @@ type fakeExecutionGraphStore struct {
 	cancelCalls int
 	reviewed    execution.ReviewDecision
 	evidence    domain.TaskReviewRecord
+}
+
+func (f *fakeExecutionGraphStore) PrepareExecutionGraph(_ context.Context, graph domain.ExecutionGraph) (bool, error) {
+	if f.saveErr != nil {
+		return false, f.saveErr
+	}
+	if _, active := f.graphs[graph.ID]; active {
+		return false, execution.ErrGraphConflict
+	}
+	if previous, exists := f.prepared[graph.ID]; exists {
+		if !reflect.DeepEqual(previous, graph) {
+			return false, execution.ErrGraphConflict
+		}
+		return false, nil
+	}
+	if f.prepared == nil {
+		f.prepared = make(map[string]domain.ExecutionGraph)
+	}
+	f.prepared[graph.ID] = graph
+	return true, nil
 }
 
 func (f *fakeExecutionGraphStore) SaveExecutionGraph(_ context.Context, graph domain.ExecutionGraph) error {
@@ -213,6 +235,32 @@ func TestExecutionGraphImportReadAndList(t *testing.T) {
 		if rec.Code != tc.code {
 			t.Fatalf("GET %s status=%d body=%s", tc.path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestPrepareExecutionGraphNeverWakesAndRetriesIdempotently(t *testing.T) {
+	store := &fakeExecutionGraphStore{}
+	wakes := 0
+	router := executionGraphTestRouter(store, func() { wakes++ })
+	graph := executionGraphFixture()
+	for i, want := range []int{http.StatusCreated, http.StatusOK} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, requestJSON(t, http.MethodPost, "/execution-graphs/prepared", graph))
+		if rec.Code != want || wakes != 0 || len(store.graphs) != 0 || len(store.prepared) != 1 {
+			t.Fatalf("prepare %d status=%d wakes=%d active=%d prepared=%d body=%s", i, rec.Code, wakes, len(store.graphs), len(store.prepared), rec.Body.String())
+		}
+	}
+	changed := graph
+	changed.Objective = "Changed objective"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, requestJSON(t, http.MethodPost, "/execution-graphs/prepared", changed))
+	if rec.Code != http.StatusConflict || wakes != 0 {
+		t.Fatalf("changed prepare status=%d wakes=%d body=%s", rec.Code, wakes, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, requestJSON(t, http.MethodGet, "/execution-graphs", nil))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), graph.ID) {
+		t.Fatalf("prepared graph appeared in active listing: status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

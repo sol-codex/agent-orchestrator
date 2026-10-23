@@ -65,6 +65,71 @@ func TestExecutionGraphImportRejectsUnknownProject(t *testing.T) {
 	}
 }
 
+func TestPreparedExecutionGraphIsInertAcrossStoreReopen(t *testing.T) {
+	dataDir := t.TempDir()
+	s, err := sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedProject(t, s, "project")
+	ctx := context.Background()
+	graph := testGraph("prepared", "project", graphTask("ready", domain.TaskReady, "src/ready.go"))
+	created, err := s.PrepareExecutionGraph(ctx, graph)
+	if err != nil || !created {
+		t.Fatalf("prepare created=%v err=%v", created, err)
+	}
+	created, err = s.PrepareExecutionGraph(ctx, graph)
+	if err != nil || created {
+		t.Fatalf("retry created=%v err=%v", created, err)
+	}
+	changed := graph
+	changed.Objective = "Other objective"
+	if _, err := s.PrepareExecutionGraph(ctx, changed); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("changed bytes err=%v, want conflict", err)
+	}
+	if err := s.SaveExecutionGraph(ctx, graph); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("legacy import of reserved ID err=%v, want conflict", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = sqlite.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, found, err := s.GetExecutionGraph(ctx, graph.ID); err != nil || found {
+		t.Fatalf("prepared graph visible through active GET: found=%v err=%v", found, err)
+	}
+	if active, err := s.ListActiveGraphs(ctx); err != nil || len(active) != 0 {
+		t.Fatalf("prepared graph visible to scheduler: active=%v err=%v", active, err)
+	}
+	if claimed, err := s.ClaimTask(ctx, execution.Claim{
+		GraphID: graph.ID, TaskID: "ready", AttemptID: "must-not-start", AgentID: "worker", Provider: "codex",
+		ContractFingerprint: "unreachable", Resources: []string{"src/ready.go"},
+		At: time.Now().UTC(), LeaseExpiresAt: time.Now().UTC().Add(time.Minute),
+	}); err != nil || claimed {
+		t.Fatalf("prepared task claimed after restart: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestPrepareExecutionGraphRejectsRuntimeFactsAndActiveID(t *testing.T) {
+	s := newTestStore(t)
+	seedProject(t, s, "project")
+	ctx := context.Background()
+	active := testGraph("active", "project", graphTask("task", domain.TaskReady))
+	if err := s.SaveExecutionGraph(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PrepareExecutionGraph(ctx, active); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("prepare active ID err=%v, want conflict", err)
+	}
+	withRuntime := testGraph("runtime", "project", graphTask("task", domain.TaskRunning))
+	if _, err := s.PrepareExecutionGraph(ctx, withRuntime); err == nil {
+		t.Fatal("prepare accepted an active task without valid runtime facts")
+	}
+}
+
 func TestExecutionGraphPlanRevisionAndRuntimeFence(t *testing.T) {
 	s := newTestStore(t)
 	seedProject(t, s, "project")
