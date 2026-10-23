@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -31,29 +32,80 @@ func (f executionSessionStoreFake) ListReportsBySession(_ context.Context, id do
 	return f.reports[id], nil
 }
 
-type executionSpawnFake struct{ cfg ports.SpawnConfig }
+type executionSpawnFake struct {
+	cfg   ports.SpawnConfig
+	calls int
+}
 
 func (f *executionSpawnFake) Spawn(_ context.Context, cfg ports.SpawnConfig) (domain.Session, int, int, error) {
+	f.calls++
 	f.cfg = cfg
 	return domain.Session{SessionRecord: domain.SessionRecord{ID: "worker-1"}}, 0, 0, nil
 }
 
+type executionSpawnFenceFake struct {
+	allowed                                       bool
+	err                                           error
+	graphID, taskID, attemptID, agentID, provider string
+}
+
+func (f *executionSpawnFenceFake) CanSpawnExecutionAttempt(_ context.Context, graphID, taskID, attemptID, agentID, provider string) (bool, error) {
+	f.graphID, f.taskID, f.attemptID, f.agentID, f.provider = graphID, taskID, attemptID, agentID, provider
+	return f.allowed, f.err
+}
+
 func TestExecutionSpawnPreservesAttemptAndContract(t *testing.T) {
 	spawn := &executionSpawnFake{}
-	dispatch := executionSessions{sessions: spawn}
+	fence := &executionSpawnFenceFake{allowed: true}
+	dispatch := executionSessions{sessions: spawn, spawnFence: fence}
 	graph := domain.ExecutionGraph{ID: "graph-1", ProjectID: "hub", Objective: "Ship the wave"}
 	task := domain.ExecutionTask{ID: "E2", SliceID: "E", Objective: "Implement turn brief", Scope: "Mapper only", Deliverables: []string{"Typed output"}, AcceptanceCriteria: []string{"No private data"}, Resources: []string{"src/domain/brief.ts"}}
-	id, err := dispatch.Spawn(context.Background(), graph, task, execution.Agent{ID: "codex"}, "attempt-1")
+	id, err := dispatch.Spawn(context.Background(), graph, task, execution.Agent{ID: "codex", Provider: "codex"}, "attempt-1")
 	if err != nil || id != "worker-1" {
 		t.Fatalf("spawn = %s, %v", id, err)
 	}
 	if spawn.cfg.ClientRequestID != "attempt-1" || spawn.cfg.ClientRequestHash == "" || spawn.cfg.Harness != domain.HarnessCodex || spawn.cfg.Async {
 		t.Fatalf("spawn config lost durable identity or sync boundary: %+v", spawn.cfg)
 	}
+	if spawn.calls != 1 || fence.graphID != graph.ID || fence.taskID != task.ID || fence.attemptID != "attempt-1" || fence.agentID != "codex" || fence.provider != "codex" {
+		t.Fatalf("spawn did not use checked durable identity: calls=%d fence=%+v", spawn.calls, fence)
+	}
 	for _, required := range []string{"graph-1", "E2", "Typed output", "No private data", "src/domain/brief.ts", "ao report --done --note"} {
 		if !strings.Contains(spawn.cfg.Prompt, required) {
 			t.Fatalf("prompt omitted %q", required)
 		}
+	}
+}
+
+func TestExecutionSpawnFenceRefusalNeverCallsSpawner(t *testing.T) {
+	graph := domain.ExecutionGraph{ID: "hub-graph", ProjectID: "hub"}
+	task := domain.ExecutionTask{ID: "task-1"}
+	agent := execution.Agent{ID: "codex", Provider: "codex"}
+	for _, tc := range []struct {
+		name  string
+		fence *executionSpawnFenceFake
+	}{
+		{"revoked or mismatched", &executionSpawnFenceFake{}},
+		{"store unavailable", &executionSpawnFenceFake{err: errors.New("store unavailable")}},
+		{"missing gate", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spawn := &executionSpawnFake{}
+			dispatch := executionSessions{sessions: spawn}
+			if tc.fence != nil {
+				dispatch.spawnFence = tc.fence
+			}
+			if id, err := dispatch.Spawn(context.Background(), graph, task, agent, "attempt-1"); err == nil || id != "" {
+				t.Fatalf("fenced spawn returned id=%s err=%v", id, err)
+			} else if tc.fence == nil || tc.fence.err == nil {
+				if !errors.Is(err, errExecutionSpawnRefused) {
+					t.Fatalf("refusal lost distinct identity: %v", err)
+				}
+			}
+			if spawn.calls != 0 {
+				t.Fatalf("fenced attempt called external spawner %d times", spawn.calls)
+			}
+		})
 	}
 }
 
