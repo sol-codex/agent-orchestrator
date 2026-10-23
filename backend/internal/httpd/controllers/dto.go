@@ -170,6 +170,15 @@ type ListProjectsResponse struct {
 	Projects []projectsvc.Summary `json:"projects"`
 }
 
+// ExternalCoordinatorResponse reports a live external lease, if any.
+type ExternalCoordinatorResponse struct {
+	ExternalCoordinator *domain.ExternalCoordinatorLease `json:"externalCoordinator"`
+}
+
+type ExternalCoordinatorClearQuery struct {
+	OwnerID string `query:"ownerId" required:"true" description:"Owner ID used to claim the lease."`
+}
+
 // ProjectResponse is the { project } body shared by POST /projects (201).
 type ProjectResponse struct {
 	Project projectsvc.Project `json:"project"`
@@ -2071,6 +2080,41 @@ type InstallStatusResponse = systeminstall.Job
 // AutomationIDParam identifies a recurring definition.
 type AutomationIDParam struct {
 	AutomationID string `path:"automationId" description:"Automation identifier."`
+}
+
+// ExecutionGraphIDParam identifies an approved execution graph.
+type ExecutionGraphIDParam struct {
+	GraphID string `path:"graphId" description:"Stable execution graph identifier."`
+}
+
+// ExecutionTaskIDParam identifies one task within an execution graph.
+type ExecutionTaskIDParam struct {
+	TaskID string `path:"taskId" description:"Stable task identifier."`
+}
+
+// ExecutionGraphRequest is the exact versioned graph imported or revised by a
+// coordinator. Domain validation remains the authoritative contract.
+type ExecutionGraphRequest = domain.ExecutionGraph
+
+// ExecutionGraphEnvelope wraps one persisted graph.
+type ExecutionGraphEnvelope struct {
+	Graph domain.ExecutionGraph `json:"graph"`
+}
+
+// ListExecutionGraphsResponse contains active project execution graphs.
+type ListExecutionGraphsResponse struct {
+	Graphs []domain.ExecutionGraph `json:"graphs"`
+}
+
+// ReviewExecutionTaskRequest records an explicit acceptance decision for one
+// finished worker attempt. The current task must be awaiting review.
+type ReviewExecutionTaskRequest struct {
+	AttemptID         string   `json:"attemptId"`
+	Decision          string   `json:"decision" enum:"accept,revise,reject"`
+	SourceHead        string   `json:"sourceHead,omitempty"`
+	PRURL             string   `json:"prUrl,omitempty"`
+	ValidationSummary string   `json:"validationSummary,omitempty"`
+	EvidenceRefs      []string `json:"evidenceRefs,omitempty"`
 }
 
 // ListAutomationsQuery describes filters and pagination for automation definitions.

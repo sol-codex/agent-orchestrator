@@ -37,6 +37,7 @@ type systemPromptConfig struct {
 	Standalone            bool
 	Project               promptProject
 	OrchestratorSessionID string
+	ExternalCoordinator   bool
 	ProjectRules          string
 	OrchestratorRules     string
 	AdditionalSections    []string
@@ -85,9 +86,11 @@ func buildSystemPromptText(cfg systemPromptConfig) string {
 			break
 		}
 		orchestratorID := strings.TrimSpace(cfg.OrchestratorSessionID)
-		sections = append(sections, workerSystemPrompt(cfg.Project, orchestratorID != ""))
+		sections = append(sections, workerSystemPrompt(cfg.Project, orchestratorID != "", cfg.ExternalCoordinator))
 		if orchestratorID != "" {
 			sections = append(sections, workerOrchestratorPrompt(orchestratorID))
+		} else if cfg.ExternalCoordinator {
+			sections = append(sections, workerExternalCoordinatorPrompt())
 		}
 		if strings.TrimSpace(cfg.Project.Repo) != "" {
 			sections = append(sections, workerNativeReviewPrompt(cfg.Project, orchestratorID != ""))
@@ -277,7 +280,7 @@ Your job is to coordinate work, not to perform implementation. Keep the project 
 %s`, projectName(project), project.ID, project.ID, project.ID, projectContextSection(project))
 }
 
-func workerSystemPrompt(project promptProject, hasOrchestrator bool) string {
+func workerSystemPrompt(project promptProject, hasOrchestrator, externalCoordinator bool) string {
 	taskSourceRules := `## Task Source and PR/MR Behavior
 
 - Treat the explicit task description, provider issue context, or claimed PR/MR context as the source of truth for this session.
@@ -308,6 +311,8 @@ func workerSystemPrompt(project promptProject, hasOrchestrator bool) string {
 	parallelHelpRules := "- If parallel help is needed for CI or review follow-up and an orchestrator is attached to this project, ask it to spawn additional AO worker sessions instead of delegating inside the runtime.\n- If no orchestrator is attached, continue serially and report the need for additional AO workers to the human."
 	if hasOrchestrator {
 		parallelHelpRules = "- If parallel help is needed for CI or review follow-up, ask the orchestrator to spawn additional AO worker sessions instead of using the agent runtime's built-in subagent or task-delegation tools."
+	} else if externalCoordinator {
+		parallelHelpRules = "- If parallel help is needed for CI or review follow-up, run `ao report --needs-input --note <request>` so the external coordinator can inspect the persisted request. There is no AO orchestrator chat to message; tell the human in this session if the request is urgent. Do not delegate inside the agent runtime."
 	}
 	return fmt.Sprintf(`## AO Worker Role
 
@@ -326,7 +331,7 @@ Your job is to complete the assigned task in this workspace. For implementation,
 
 ## Worker Reports
 
-Use `+"`ao report`"+` to persist meaningful progress for the active project orchestrator. `+"`AO_SESSION_ID`"+` selects this worker automatically.
+Use `+"`ao report`"+` to persist meaningful project progress. `+"`AO_SESSION_ID`"+` selects this worker automatically. Reports are delivered to an active AO orchestrator session only; an external coordinator can read the persisted project report projection but is not messaged automatically.
 
 - After a meaningful milestone, run `+"`ao report --checkpoint --note <text>`"+`.
 - When a decision or missing input blocks progress, run `+"`ao report --needs-input --note <text>`"+`.
@@ -402,6 +407,12 @@ An active orchestrator session exists for this project.
 Message it only for true blockers, cross-session coordination, or decisions you cannot resolve locally:
 
 `+"`ao send --session %s --message \"<your message>\"`", orchestratorID)
+}
+
+func workerExternalCoordinatorPrompt() string {
+	return `## External Coordinator
+
+A coordinator outside AO is registered for this project. This does not create an AO orchestrator chat or an ` + "`ao send`" + ` target. Use ` + "`ao report`" + ` to persist milestones, blockers, and requests. The external coordinator can read them through ` + "`GET /api/v1/reports?projectId=<id>`" + `; AO does not automatically deliver those reports outside the app.`
 }
 
 // workerMultiPRPrompt explains the branch convention AO uses to attribute pull

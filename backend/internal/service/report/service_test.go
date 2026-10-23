@@ -80,6 +80,19 @@ func TestCreateDerivesOwnershipAndFixedDeliveryDeadlines(t *testing.T) {
 	}
 }
 
+func TestDoneReportPersistsPendingWithoutAOOrchestrator(t *testing.T) {
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	st := &fakeStore{ok: true, session: domain.SessionRecord{ID: "ao-worker", ProjectID: "project", Kind: domain.KindWorker}}
+	svc := New(Deps{Store: st, Now: func() time.Time { return now }, NewID: func() string { return "report-1" }})
+	report, err := svc.Create(context.Background(), CreateInput{SessionID: "ao-worker", State: domain.ReportDone, Note: "finished"})
+	if err != nil {
+		t.Fatalf("done report with no AO orchestrator: %v", err)
+	}
+	if report.DeliveryState != domain.ReportPending || st.created.ID != "report-1" || st.created.ProjectID != "project" {
+		t.Fatalf("report was not persisted pending: returned=%+v stored=%+v", report, st.created)
+	}
+}
+
 func TestCreateDefendsValidationAndOwnership(t *testing.T) {
 	worker := &fakeStore{ok: true, session: domain.SessionRecord{ID: "ao-2", ProjectID: "ao", Kind: domain.KindWorker}}
 	for _, tc := range []struct {

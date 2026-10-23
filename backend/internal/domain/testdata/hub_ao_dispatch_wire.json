@@ -1,0 +1,208 @@
+{
+  "hubContractHead": "b719698dfa6edd7b785adf011935a22df8cdbc96",
+  "expectedGrantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
+  "observedAt": "2026-10-23T15:01:00.000Z",
+  "grant": {
+    "contractVersion": "hub.ao-dispatch/1",
+    "grantId": "grant-1",
+    "graphId": "graph-1",
+    "projectId": "project-1",
+    "planId": "plan-1",
+    "planRevision": "rev-1",
+    "planContentDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "approvalId": "plan-approval-1",
+    "approvalDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+    "hubAOPlanBindingDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "graphContractDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "handoffSetDigest": "5555555555555555555555555555555555555555555555555555555555555555",
+    "repositoryRevisions": [
+      {
+        "repositoryId": "hub",
+        "remote": "origin",
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "hostId": "laptop-1",
+    "hostGeneration": 7,
+    "authorityEpoch": 3,
+    "issuerOwnerId": "owner-1",
+    "ownerAuthorizationEventId": "graph-approval-1",
+    "ownerAuthorizationDigest": "6666666666666666666666666666666666666666666666666666666666666666",
+    "issuedAt": "2026-10-23T15:00:00.000Z",
+    "expiresAt": "2026-10-23T15:10:00.000Z",
+    "oneUse": true,
+    "grantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
+    "prepareId": "prepare-1",
+    "graphBytesSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "receiptIdentitySha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "storeId": "ao-store-1"
+  },
+  "permit": {
+    "contractVersion": "hub.ao-dispatch/1",
+    "grantId": "grant-1",
+    "grantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
+    "redemptionId": "redemption-1",
+    "graphId": "graph-1",
+    "projectId": "project-1",
+    "graphContractDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "hubAOPlanBindingDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "hostId": "laptop-1",
+    "hostGeneration": 7,
+    "issuedAt": "2026-10-23T15:01:00.000Z",
+    "useBy": "2026-10-23T15:02:00.000Z",
+    "proof": {
+      "scheme": "signature",
+      "keyId": "hub-key-1",
+      "bytes": "opaque-proof"
+    },
+    "prepareId": "prepare-1",
+    "graphBytesSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "receiptIdentitySha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "storeId": "ao-store-1",
+    "authorityEpoch": 3
+  },
+  "receipt": {
+    "contractVersion": "hub.ao-dispatch/1",
+    "grantId": "grant-1",
+    "grantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
+    "redemptionId": "redemption-1",
+    "graphId": "graph-1",
+    "projectId": "project-1",
+    "graphContractDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "hubAOPlanBindingDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "hostId": "laptop-1",
+    "hostGeneration": 7,
+    "activationId": "activation-1",
+    "graphRevision": 1,
+    "state": "active",
+    "activatedAt": "2026-10-23T15:01:20.000Z",
+    "prepareId": "prepare-1",
+    "graphBytesSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "receiptIdentitySha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "storeId": "ao-store-1",
+    "authorityEpoch": 3
+  },
+  "negative": [
+    {
+      "name": "changed grant graph digest",
+      "kind": "grant",
+      "field": "graphContractDigest",
+      "value": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "name": "changed grant plan revision",
+      "kind": "grant",
+      "field": "planRevision",
+      "value": "rev-2"
+    },
+    {
+      "name": "wrong permit host",
+      "kind": "permit",
+      "field": "hostId",
+      "value": "bench-1"
+    },
+    {
+      "name": "stale permit generation",
+      "kind": "permit",
+      "field": "hostGeneration",
+      "value": 8
+    },
+    {
+      "name": "wrong receipt redemption",
+      "kind": "receipt",
+      "field": "redemptionId",
+      "value": "redemption-2"
+    },
+    {
+      "name": "wrong receipt graph digest",
+      "kind": "receipt",
+      "field": "graphContractDigest",
+      "value": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "name": "wrong grant prepareId",
+      "kind": "grant",
+      "field": "prepareId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong grant graphBytesSha256",
+      "kind": "grant",
+      "field": "graphBytesSha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong grant receiptIdentitySha256",
+      "kind": "grant",
+      "field": "receiptIdentitySha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong grant storeId",
+      "kind": "grant",
+      "field": "storeId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong permit prepareId",
+      "kind": "permit",
+      "field": "prepareId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong permit graphBytesSha256",
+      "kind": "permit",
+      "field": "graphBytesSha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong permit receiptIdentitySha256",
+      "kind": "permit",
+      "field": "receiptIdentitySha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong permit storeId",
+      "kind": "permit",
+      "field": "storeId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong permit authorityEpoch",
+      "kind": "permit",
+      "field": "authorityEpoch",
+      "value": 4
+    },
+    {
+      "name": "wrong receipt prepareId",
+      "kind": "receipt",
+      "field": "prepareId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong receipt graphBytesSha256",
+      "kind": "receipt",
+      "field": "graphBytesSha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong receipt receiptIdentitySha256",
+      "kind": "receipt",
+      "field": "receiptIdentitySha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong receipt storeId",
+      "kind": "receipt",
+      "field": "storeId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong receipt authorityEpoch",
+      "kind": "receipt",
+      "field": "authorityEpoch",
+      "value": 4
+    }
+  ],
+  "expectedPermitSigningBytes": "hub.ao-activation-permit/1\n{\"authorityEpoch\":3,\"contractVersion\":\"hub.ao-dispatch/1\",\"grantDigest\":\"d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4\",\"grantId\":\"grant-1\",\"graphBytesSha256\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"graphContractDigest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"graphId\":\"graph-1\",\"hostGeneration\":7,\"hostId\":\"laptop-1\",\"hubAOPlanBindingDigest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"issuedAt\":\"2026-10-23T15:01:00.000Z\",\"prepareId\":\"prepare-1\",\"projectId\":\"project-1\",\"proof\":{\"keyId\":\"hub-key-1\",\"scheme\":\"signature\"},\"receiptIdentitySha256\":\"8888888888888888888888888888888888888888888888888888888888888888\",\"redemptionId\":\"redemption-1\",\"storeId\":\"ao-store-1\",\"useBy\":\"2026-10-23T15:02:00.000Z\"}"
+}

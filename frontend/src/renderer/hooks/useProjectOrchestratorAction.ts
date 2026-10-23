@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { CLOUD_PROJECT_KIND, hasConfiguredOrchestratorAgent, type WorkspaceSession } from "../types/workspace";
+import { CLOUD_PROJECT_KIND, externalCoordinatorActive, hasConfiguredOrchestratorAgent, type WorkspaceSession } from "../types/workspace";
 import { cloudSessionsQueryKey, workspaceQueryKeyForHost, type WorkspaceScope } from "./useWorkspaceQuery";
 import { spawnCloudOrchestrator } from "../lib/cloud-orchestrator";
 import {
@@ -52,6 +52,7 @@ export function useProjectOrchestratorAction({
 	const isProjectRestarting = useUiStore((state) => projectKey ? state.restartingProjectIds.has(projectKey) : false);
 	const isProvisioning = useUiStore((state) => projectKey ? state.provisioningProjectIds.has(projectKey) : false);
 	const canResumeOrchestrator = useCanResumeAgent(orchestrator, hostId);
+	const externallyCoordinated = Boolean(project && externalCoordinatorActive(project));
 	const startupError = useUiStore((state) => projectKey ? state.orchestratorStartupErrors[projectKey] : undefined);
 	const setStartupError = useUiStore((state) => state.setOrchestratorStartupError);
 	const previousProject = useRef({ projectId, hostId });
@@ -116,6 +117,7 @@ export function useProjectOrchestratorAction({
 	});
 	const openOrchestrator = (mode?: "tui") => {
 		if (!projectId || !hostConnected || isProjectRestarting || isProvisioning) return;
+		if (externallyCoordinated && !orchestrator) return;
 		// Read the cache synchronously as well as disabling both rendered copies.
 		// Two clicks in the same render must still produce just one request.
 		if (queryClient.isMutating({ mutationKey, exact: true })) return;
@@ -139,7 +141,7 @@ export function useProjectOrchestratorAction({
 	const openNewTask = () => {
 		if (projectId && hostConnected && !isProjectRestarting && !isProvisioning) useUiStore.getState().requestNewTask(projectId, hostId);
 	};
-	return { projectId, orchestrator, isSpawning, isProjectRestarting, isProvisioning, spawnError,
+	return { projectId, orchestrator, externallyCoordinated, isSpawning, isProjectRestarting, isProvisioning, spawnError,
 		canCreateAsTui: isChatPreflightError(error), openOrchestrator, openNewTask };
 }
 
