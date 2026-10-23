@@ -21581,6 +21581,8 @@ components:
           type: string
         githubLogin:
           type: string
+        installId:
+          type: string
         optedOut:
           type: boolean
       required:
