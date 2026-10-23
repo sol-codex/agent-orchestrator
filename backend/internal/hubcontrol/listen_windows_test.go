@@ -13,11 +13,28 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 )
+
+func currentAccountSID(t *testing.T) string {
+	t.Helper()
+	token, err := windows.OpenCurrentProcessToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer token.Close()
+	user, err := token.GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user.User.Sid.String()
+}
 
 func TestWindowsProtectedPipeBindsAndAcceptsOwner(t *testing.T) {
 	runFile := t.TempDir() + `\running.json`
-	ln, name, err := Listen(runFile)
+	e := testEnrollment()
+	e.ServiceSID = currentAccountSID(t)
+	ln, name, err := Listen(runFile, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,11 +63,12 @@ func TestWindowsProtectedPipeBindsAndAcceptsOwner(t *testing.T) {
 
 func TestWindowsHTTPOverProtectedPipeRequiresCredential(t *testing.T) {
 	enrollment := testEnrollment()
+	enrollment.ServiceSID = currentAccountSID(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var name string
-	enabled, err := start(ctx, t.TempDir()+`\running.json`, enrollment, func(runFilePath string) (net.Listener, string, error) {
-		ln, addr, err := Listen(runFilePath)
+	enabled, err := start(ctx, t.TempDir()+`\running.json`, enrollment, func(runFilePath string, e *Enrollment) (net.Listener, string, error) {
+		ln, addr, err := Listen(runFilePath, e)
 		name = addr
 		return ln, addr, err
 	})
@@ -111,5 +129,24 @@ func TestWindowsHTTPOverProtectedPipeRequiresCredential(t *testing.T) {
 				t.Fatal("response disclosed credential or identity")
 			}
 		})
+	}
+}
+
+func TestWindowsPipeRejectsWrongServerIdentityBeforeBind(t *testing.T) {
+	e := testEnrollment()
+	if e.ServiceSID == currentAccountSID(t) {
+		t.Fatal("fixture unexpectedly matches current account")
+	}
+	ln, name, err := Listen(t.TempDir()+`\running.json`, e)
+	if err == nil || ln != nil || name != "" {
+		t.Fatalf("wrong identity bound pipe: %q %v", name, err)
+	}
+}
+
+func TestWindowsPipeSecurityDescriptorUsesOnlyExplicitIdentities(t *testing.T) {
+	e := testEnrollment()
+	want := "D:P(A;;GA;;;SY)(A;;GA;;;" + e.ServiceSID + ")(A;;GRGW;;;" + e.BridgeSID + ")"
+	if got := pipeSecurityDescriptor(e); got != want || strings.Contains(got, ";;;OW") || strings.Contains(got, ";;;WD") {
+		t.Fatalf("unexpected pipe DACL: %q", got)
 	}
 }

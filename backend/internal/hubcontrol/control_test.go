@@ -18,7 +18,8 @@ import (
 )
 
 func testEnrollment() *Enrollment {
-	e := &Enrollment{StoreID: "store-A", HostID: "host-A", Generation: 7}
+	e := &Enrollment{StoreID: "store-A", HostID: "host-A", Generation: 7,
+		ServiceSID: "S-1-5-21-1000-2000-3000-1001", BridgeSID: "S-1-5-21-1000-2000-3000-1002"}
 	for i := range e.Key {
 		e.Key[i] = byte(i + 1)
 	}
@@ -109,7 +110,7 @@ func TestInvalidEnrollmentAndBindFailureFailClosed(t *testing.T) {
 		t.Fatalf("invalid enrollment: %v", err)
 	}
 	called := false
-	listen := func(string) (net.Listener, string, error) {
+	listen := func(string, *Enrollment) (net.Listener, string, error) {
 		called = true
 		return nil, "", errors.New("bind refused")
 	}
@@ -124,6 +125,30 @@ func TestInvalidEnrollmentAndBindFailureFailClosed(t *testing.T) {
 	enabled, err = start(context.Background(), "ignored", testEnrollment(), listen)
 	if enabled || err == nil || !called {
 		t.Fatalf("bind failure enabled=%v err=%v called=%v", enabled, err, called)
+	}
+}
+
+func TestEnrollmentRequiresDistinctSpecificAccountSIDs(t *testing.T) {
+	service := testEnrollment()
+	service.ServiceSID = "S-1-5-80-1000-2000-3000-4000-5000"
+	if _, err := Handler(service); err != nil {
+		t.Fatalf("specific service SID rejected: %v", err)
+	}
+	for _, tc := range []struct{ service, bridge string }{
+		{"", "S-1-5-21-1000-2000-3000-1002"},
+		{"S-1-5-21-1000-2000-3000-1001", ""},
+		{"S-1-1-0", "S-1-5-21-1000-2000-3000-1002"},
+		{"S-1-5-11", "S-1-5-21-1000-2000-3000-1002"},
+		{"S-1-5-32-544", "S-1-5-21-1000-2000-3000-1002"},
+		{"S-1-5-21-1000-2000-3000-513", "S-1-5-21-1000-2000-3000-1002"},
+		{"S-1-5-21-1000-2000-3000-1001", "S-1-5-21-1000-2000-3000-1001"},
+		{"S-1-5-21-1000-2000-3000-1001)(A;;GA;;;WD", "S-1-5-21-1000-2000-3000-1002"},
+	} {
+		e := testEnrollment()
+		e.ServiceSID, e.BridgeSID = tc.service, tc.bridge
+		if _, err := Handler(e); !errors.Is(err, ErrInvalidEnrollment) {
+			t.Fatalf("accepted service=%q bridge=%q: %v", tc.service, tc.bridge, err)
+		}
 	}
 }
 

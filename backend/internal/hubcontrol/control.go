@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,16 +25,37 @@ type Enrollment struct {
 	StoreID    string
 	HostID     string
 	Generation uint64
+	ServiceSID string // Windows account that runs the AO daemon.
+	BridgeSID  string // Windows account allowed to connect to the pipe.
 }
 
 var ErrInvalidEnrollment = errors.New("hub control enrollment is invalid")
 
 func validEnrollment(e *Enrollment) bool {
-	if e == nil || e.StoreID == "" || e.HostID == "" || e.Generation == 0 {
+	if e == nil || e.StoreID == "" || e.HostID == "" || e.Generation == 0 ||
+		!validAccountSID(e.ServiceSID) || !validAccountSID(e.BridgeSID) || e.ServiceSID == e.BridgeSID {
 		return false
 	}
 	var zero [32]byte
 	return subtle.ConstantTimeCompare(e.Key[:], zero[:]) != 1
+}
+
+var accountSID = regexp.MustCompile(`^S-1-5-(?:21-(?:[0-9]{1,10}-){3}[0-9]{1,10}|80-(?:[0-9]{1,10}-){4}[0-9]{1,10})$`)
+
+// Accept only explicit account/service identities, never well-known broad groups.
+// Windows parses the SID again before the pipe is bound.
+func validAccountSID(s string) bool {
+	if !accountSID.MatchString(s) {
+		return false
+	}
+	// Domain/local built-in group RIDs are below 1000. This deliberately
+	// excludes built-in Administrator too: enrollment requires a dedicated ID.
+	if strings.HasPrefix(s, "S-1-5-21-") {
+		rid := s[strings.LastIndexByte(s, '-')+1:]
+		value, err := strconv.ParseUint(rid, 10, 32)
+		return err == nil && value >= 1000
+	}
+	return true
 }
 
 // Handler exposes only an authenticated inert status response. Do not add
@@ -74,7 +96,7 @@ func Handler(e *Enrollment) (http.Handler, error) {
 	}), nil
 }
 
-type listenFunc func(string) (net.Listener, string, error)
+type listenFunc func(string, *Enrollment) (net.Listener, string, error)
 
 // Start remains disabled when enrollment is absent. There is no credential
 // loader or production caller with an enrollment in this source slice.
@@ -93,7 +115,7 @@ func start(ctx context.Context, runFilePath string, enrollment *Enrollment, list
 	if err != nil {
 		return false, err
 	}
-	ln, _, err := listen(runFilePath)
+	ln, _, err := listen(runFilePath, enrollment)
 	if err != nil {
 		return false, fmt.Errorf("hub control listener unavailable: %w", err)
 	}
