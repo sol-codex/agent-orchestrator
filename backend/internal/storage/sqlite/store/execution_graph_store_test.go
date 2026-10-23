@@ -2,6 +2,9 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"runtime"
 	"strings"
@@ -74,18 +77,37 @@ func TestPreparedExecutionGraphIsInertAcrossStoreReopen(t *testing.T) {
 	seedProject(t, s, "project")
 	ctx := context.Background()
 	graph := testGraph("prepared", "project", graphTask("ready", domain.TaskReady, "src/ready.go"))
-	created, err := s.PrepareExecutionGraph(ctx, graph)
+	receipt, created, err := s.PrepareExecutionGraph(ctx, "prep-1", graph)
 	if err != nil || !created {
 		t.Fatalf("prepare created=%v err=%v", created, err)
 	}
-	created, err = s.PrepareExecutionGraph(ctx, graph)
+	retryReceipt, created, err := s.PrepareExecutionGraph(ctx, "prep-1", graph)
 	if err != nil || created {
 		t.Fatalf("retry created=%v err=%v", created, err)
 	}
+	if receipt != retryReceipt || receipt.GraphBytesSHA256 == "" || receipt.Status != "prepared" {
+		t.Fatalf("unstable receipt: %#v %#v", receipt, retryReceipt)
+	}
+	fullGraphBytes, err := json.Marshal(graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullGraphHash := sha256.Sum256(fullGraphBytes)
+	if receipt.GraphBytesSHA256 != hex.EncodeToString(fullGraphHash[:]) {
+		t.Fatalf("full graph digest=%s", receipt.GraphBytesSHA256)
+	}
 	changed := graph
 	changed.Objective = "Other objective"
-	if _, err := s.PrepareExecutionGraph(ctx, changed); !errors.Is(err, execution.ErrGraphConflict) {
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-1", changed); !errors.Is(err, execution.ErrGraphConflict) {
 		t.Fatalf("changed bytes err=%v, want conflict", err)
+	}
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-2", graph); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("changed prepare ID err=%v, want conflict", err)
+	}
+	other := graph
+	other.ID = "different-graph"
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-1", other); !errors.Is(err, execution.ErrGraphConflict) {
+		t.Fatalf("reused prepare ID err=%v, want conflict", err)
 	}
 	if err := s.SaveExecutionGraph(ctx, graph); !errors.Is(err, execution.ErrGraphConflict) {
 		t.Fatalf("legacy import of reserved ID err=%v, want conflict", err)
@@ -98,6 +120,12 @@ func TestPreparedExecutionGraphIsInertAcrossStoreReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
+	if got, found, err := s.GetPreparedExecutionGraph(ctx, "prep-1", false); err != nil || !found || got != receipt {
+		t.Fatalf("prepare receipt after restart: got=%#v found=%v err=%v", got, found, err)
+	}
+	if got, found, err := s.GetPreparedExecutionGraph(ctx, graph.ID, true); err != nil || !found || got != receipt {
+		t.Fatalf("graph receipt after restart: got=%#v found=%v err=%v", got, found, err)
+	}
 	if _, found, err := s.GetExecutionGraph(ctx, graph.ID); err != nil || found {
 		t.Fatalf("prepared graph visible through active GET: found=%v err=%v", found, err)
 	}
@@ -121,11 +149,11 @@ func TestPrepareExecutionGraphRejectsRuntimeFactsAndActiveID(t *testing.T) {
 	if err := s.SaveExecutionGraph(ctx, active); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PrepareExecutionGraph(ctx, active); !errors.Is(err, execution.ErrGraphConflict) {
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-active", active); !errors.Is(err, execution.ErrGraphConflict) {
 		t.Fatalf("prepare active ID err=%v, want conflict", err)
 	}
 	withRuntime := testGraph("runtime", "project", graphTask("task", domain.TaskRunning))
-	if _, err := s.PrepareExecutionGraph(ctx, withRuntime); err == nil {
+	if _, _, err := s.PrepareExecutionGraph(ctx, "prep-runtime", withRuntime); err == nil {
 		t.Fatal("prepare accepted an active task without valid runtime facts")
 	}
 }

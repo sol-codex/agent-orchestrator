@@ -2096,6 +2096,20 @@ type ExecutionTaskIDParam struct {
 // coordinator. Domain validation remains the authoritative contract.
 type ExecutionGraphRequest = domain.ExecutionGraph
 
+// PrepareExecutionGraphRequest gives an inert import a stable retry identity.
+type PrepareExecutionGraphRequest struct {
+	PrepareID string                `json:"prepareId"`
+	Graph     domain.ExecutionGraph `json:"graph"`
+}
+
+type PreparedExecutionGraphEnvelope struct {
+	Receipt domain.PreparedExecutionGraphReceipt `json:"receipt"`
+}
+
+type PrepareExecutionGraphIDParam struct {
+	PrepareID string `path:"prepareId" description:"Stable prepare identifier."`
+}
+
 // ExecutionGraphEnvelope wraps one persisted graph.
 type ExecutionGraphEnvelope struct {
 	Graph domain.ExecutionGraph `json:"graph"`

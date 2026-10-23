@@ -22,7 +22,8 @@ import (
 // request shape and wakes the scheduler after a successful write.
 type ExecutionGraphStore interface {
 	SaveExecutionGraph(context.Context, domain.ExecutionGraph) error
-	PrepareExecutionGraph(context.Context, domain.ExecutionGraph) (bool, error)
+	PrepareExecutionGraph(context.Context, string, domain.ExecutionGraph) (domain.PreparedExecutionGraphReceipt, bool, error)
+	GetPreparedExecutionGraph(context.Context, string, bool) (domain.PreparedExecutionGraphReceipt, bool, error)
 	GetExecutionGraph(context.Context, string) (domain.ExecutionGraph, bool, error)
 	ListActiveGraphs(context.Context) ([]domain.ExecutionGraph, error)
 	ResolveReview(context.Context, string, string, string, execution.ReviewDecision, time.Time) (bool, error)
@@ -41,8 +42,10 @@ type ExecutionGraphsController struct {
 func (c *ExecutionGraphsController) Register(r chi.Router) {
 	r.Get("/execution-graphs", c.list)
 	r.Post("/execution-graphs/prepared", c.prepare)
+	r.Get("/execution-graphs/prepared/{prepareId}", c.getPreparedByID)
 	r.Post("/execution-graphs", c.create)
 	r.Get("/execution-graphs/{graphId}", c.get)
+	r.Get("/execution-graphs/{graphId}/preparation", c.getPreparedByGraphID)
 	r.Put("/execution-graphs/{graphId}", c.update)
 	r.Post("/execution-graphs/{graphId}/reconcile", c.reconcile)
 	r.Post("/execution-graphs/{graphId}/tasks/{taskId}/review", c.review)
@@ -57,8 +60,14 @@ func (c *ExecutionGraphsController) prepare(w http.ResponseWriter, r *http.Reque
 		apispec.NotImplemented(w, r, http.MethodPost, "/api/v1/execution-graphs/prepared")
 		return
 	}
-	var graph domain.ExecutionGraph
-	if !decodeGraphRequest(w, r, &graph) {
+	var request PrepareExecutionGraphRequest
+	if err := decodeExecutionJSON(w, r, &request); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	graph := request.Graph
+	if request.PrepareID == "" || strings.TrimSpace(request.PrepareID) != request.PrepareID {
+		graphBadRequest(w, r, "A stable trimmed prepareId is required")
 		return
 	}
 	if graph.Revision != 1 {
@@ -73,7 +82,7 @@ func (c *ExecutionGraphsController) prepare(w http.ResponseWriter, r *http.Reque
 		graphBadRequest(w, r, err.Error())
 		return
 	}
-	created, err := c.Store.PrepareExecutionGraph(r.Context(), graph)
+	receipt, created, err := c.Store.PrepareExecutionGraph(r.Context(), request.PrepareID, graph)
 	if err != nil {
 		graphWriteError(w, r, err)
 		return
@@ -82,7 +91,32 @@ func (c *ExecutionGraphsController) prepare(w http.ResponseWriter, r *http.Reque
 	if created {
 		status = http.StatusCreated
 	}
-	envelope.WriteJSON(w, status, ExecutionGraphEnvelope{Graph: graph})
+	envelope.WriteJSON(w, status, PreparedExecutionGraphEnvelope{Receipt: receipt})
+}
+
+func (c *ExecutionGraphsController) getPreparedByID(w http.ResponseWriter, r *http.Request) {
+	c.getPrepared(w, r, chi.URLParam(r, "prepareId"), false)
+}
+
+func (c *ExecutionGraphsController) getPreparedByGraphID(w http.ResponseWriter, r *http.Request) {
+	c.getPrepared(w, r, chi.URLParam(r, "graphId"), true)
+}
+
+func (c *ExecutionGraphsController) getPrepared(w http.ResponseWriter, r *http.Request, id string, byGraphID bool) {
+	if c.Store == nil {
+		apispec.NotImplemented(w, r, http.MethodGet, "/api/v1/execution-graphs/prepared/{prepareId}")
+		return
+	}
+	receipt, found, err := c.Store.GetPreparedExecutionGraph(r.Context(), id, byGraphID)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if !found {
+		graphNotFound(w, r)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, PreparedExecutionGraphEnvelope{Receipt: receipt})
 }
 
 func (c *ExecutionGraphsController) create(w http.ResponseWriter, r *http.Request) {
