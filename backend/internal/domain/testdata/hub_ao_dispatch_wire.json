@@ -1,0 +1,109 @@
+{
+  "hubContractHead": "6f5bab472c87080af1b3a27c26dc21c4f7108d3a",
+  "expectedGrantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d",
+  "observedAt": "2026-10-23T15:01:00.000Z",
+  "grant": {
+    "contractVersion": "hub.ao-dispatch/1",
+    "grantId": "grant-é🚀 line<>&",
+    "graphId": "graph-1",
+    "projectId": "project-1",
+    "planId": "plan-1",
+    "planRevision": "rev-1",
+    "planContentDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "approvalId": "plan-approval-1",
+    "approvalDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+    "hubAOPlanBindingDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "graphContractDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "handoffSetDigest": "5555555555555555555555555555555555555555555555555555555555555555",
+    "repositoryRevisions": [
+      {
+        "repositoryId": "hub",
+        "remote": "origin/é🚀 branch",
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "hostId": "laptop-1",
+    "hostGeneration": 7,
+    "authorityEpoch": 3,
+    "issuerOwnerId": "owner-1",
+    "ownerAuthorizationEventId": "graph-approval-1",
+    "ownerAuthorizationDigest": "6666666666666666666666666666666666666666666666666666666666666666",
+    "issuedAt": "2026-10-23T15:00:00.000Z",
+    "expiresAt": "2026-10-23T15:10:00.000Z",
+    "oneUse": true,
+    "grantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d"
+  },
+  "permit": {
+    "contractVersion": "hub.ao-dispatch/1",
+    "grantId": "grant-é🚀 line<>&",
+    "grantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d",
+    "redemptionId": "redemption-1",
+    "graphId": "graph-1",
+    "projectId": "project-1",
+    "graphContractDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "hubAOPlanBindingDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "hostId": "laptop-1",
+    "hostGeneration": 7,
+    "issuedAt": "2026-10-23T15:01:00.000Z",
+    "useBy": "2026-10-23T15:02:00.000Z",
+    "proof": {
+      "scheme": "signature",
+      "keyId": "hub-key-1",
+      "bytes": "opaque-proof"
+    }
+  },
+  "receipt": {
+    "contractVersion": "hub.ao-dispatch/1",
+    "grantId": "grant-é🚀 line<>&",
+    "grantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d",
+    "redemptionId": "redemption-1",
+    "graphId": "graph-1",
+    "projectId": "project-1",
+    "graphContractDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "hubAOPlanBindingDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+    "hostId": "laptop-1",
+    "hostGeneration": 7,
+    "activationId": "activation-1",
+    "graphRevision": 1,
+    "state": "active",
+    "activatedAt": "2026-10-23T15:01:20.000Z"
+  },
+  "negative": [
+    {
+      "name": "changed grant graph digest",
+      "kind": "grant",
+      "field": "graphContractDigest",
+      "value": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "name": "changed grant plan revision",
+      "kind": "grant",
+      "field": "planRevision",
+      "value": "rev-2"
+    },
+    {
+      "name": "wrong permit host",
+      "kind": "permit",
+      "field": "hostId",
+      "value": "bench-1"
+    },
+    {
+      "name": "stale permit generation",
+      "kind": "permit",
+      "field": "hostGeneration",
+      "value": 8
+    },
+    {
+      "name": "wrong receipt redemption",
+      "kind": "receipt",
+      "field": "redemptionId",
+      "value": "redemption-2"
+    },
+    {
+      "name": "wrong receipt graph digest",
+      "kind": "receipt",
+      "field": "graphContractDigest",
+      "value": "7777777777777777777777777777777777777777777777777777777777777777"
+    }
+  ]
+}
