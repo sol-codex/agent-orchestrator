@@ -46,6 +46,7 @@ type LaunchConfig struct {
 	Model           string
 	Permissions     ports.PermissionMode
 	SystemPrompt    string
+	DisableTools    bool
 	ProviderScopeID string
 	// ProviderConversationID carries the stored native conversation on resume so
 	// a binding can migrate provider-side history into a fresh process home.
@@ -290,6 +291,7 @@ func (d *Driver) Start(ctx context.Context, cfg ports.ChatStartConfig) (ports.Ch
 		SessionID: cfg.SessionID, DataDir: cfg.DataDir, WorkspacePath: cfg.WorkspacePath,
 		Env:   cfg.Env,
 		Model: cfg.Model, Permissions: cfg.Permissions, SystemPrompt: cfg.SystemPrompt,
+		DisableTools:    cfg.DisableTools,
 		ProviderScopeID: cfg.ProviderScopeID,
 	}
 	connectStarted := time.Now()

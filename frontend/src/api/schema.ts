@@ -7573,6 +7573,7 @@ export interface components {
             cloudUserId?: string;
             distinctId: string;
             githubLogin?: string;
+            installId?: string;
             optedOut: boolean;
         };
         TrackerIntakeConfig: {
