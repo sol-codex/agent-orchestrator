@@ -32,6 +32,7 @@ import {
   normalizeBrowserProfileId,
   type BrowserProfileId,
   type BrowserProfileViewState,
+  type BrowserProfileUsage,
 } from "../shared/browser-profiles";
 import { attachAppShortcuts } from "./app-shortcuts";
 import type {
@@ -541,6 +542,8 @@ export type BrowserViewHost = {
     viewId: string,
     profileId: BrowserProfileId | null,
   ) => Promise<BrowserProfileViewState>;
+  getProfileUsage: (profileId: BrowserProfileId) => BrowserProfileUsage[];
+  detachProfile: (profileId: BrowserProfileId) => Promise<void>;
   isProfileLive: (profileId: BrowserProfileId) => boolean;
   clearProfileData: (profileId: BrowserProfileId) => Promise<void>;
   // Whether browser-owned UI was the most recently used application surface.
@@ -639,6 +642,7 @@ type BrowserSessionEntry = {
   profilePartition: string;
   tabs: Map<string, BrowserEntry>;
   activeTabId: string;
+  activationRevision: number;
   nextTabNumber: number;
   // Automatic mobile preview selection only owns the initial unused tab.
   // Keep this across reconnects so user-created blank tabs stay blank.
@@ -1476,6 +1480,7 @@ export function createBrowserViewHost(
           : temporaryBrowserPartition(),
         tabs: new Map(),
         activeTabId: "",
+        activationRevision: 0,
         nextTabNumber: 1,
         livePreviewPending: true,
         bounds: OFFSCREEN_BOUNDS,
@@ -1714,9 +1719,8 @@ export function createBrowserViewHost(
         // native browser operation for this session (select, close, click,
         // snapshot, ...) routes through this loop — so a bare retry
         // permanently wedges the whole session, not just this one call.
-        // Do what the runtime's own error message suggests: ask it to
-        // re-list tabs (which re-derives from session.tabs) before trying
-        // the select once more.
+        // A fresh command reconciles AO's targets and gives the native daemon
+        // another chance to consume discovery events before one bounded retry.
         if (!isAgentBrowserCommandFailure(error)) throw error;
         try {
           await options.agentBrowserRuntime.runAction(
@@ -1983,8 +1987,7 @@ export function createBrowserViewHost(
         },
         navigate: (href, loadOptions) => loadEntry(entry, href, loadOptions),
         show: () => undefined,
-        // Through agent-browser, when it runs: its tab numbers must keep
-        // matching AO's.
+        // Keep closure serialized with native page actions.
         close: async (signal) =>
           options.agentBrowserRuntime ? closeNativeTab(session, entry.tabId, signal) : closeTab(session, entry.tabId),
       };
@@ -2057,6 +2060,7 @@ export function createBrowserViewHost(
       applyBrowserViewBounds(previous.view, OFFSCREEN_BOUNDS, false);
     }
     session.activeTabId = tabId;
+    session.activationRevision += 1;
     if (previous && previous !== next) previous.driver().show(false);
     next.driver().show(true);
     if (session.devtools && isBlankBrowserEntry(next)) destroyDevTools(session);
@@ -3339,6 +3343,36 @@ export function createBrowserViewHost(
           session.profileSwitchTargetId === profileId),
     );
 
+  const getProfileUsage = (profileId: BrowserProfileId): BrowserProfileUsage[] =>
+    [...entries.values()]
+      .filter((session) => session.profileId === profileId ||
+        (session.profileSwitching && session.profileSwitchTargetId === profileId))
+      .map((session) => ({
+        viewId: session.viewId,
+        sessionId: session.sessionId,
+        blocker: session.profileSwitching ? "switching" :
+          session.agentBrowserCommands > 0 ? "agent-active" : null,
+      }));
+
+  // Called while the store reserves the profile against new users. Start all
+  // switches synchronously so each session blocks new agent commands before
+  // yielding; wait for every switch (including failures) before releasing it.
+  const detachProfile = async (profileId: BrowserProfileId): Promise<void> => {
+    const usage = getProfileUsage(profileId);
+    const blocked = usage.filter((session) => session.blocker !== null);
+    if (blocked.length) {
+      throw browserError("BROWSER_PROFILE_ACTIVE",
+        `Wait for browser activity to finish in: ${blocked.map((session) => session.sessionId).join(", ")}. Then try again.`);
+    }
+    const results = await Promise.allSettled(
+      usage.map((session) => switchProfile(session.viewId, null)),
+    );
+    if (results.some((result) => result.status === "rejected")) {
+      throw browserError("BROWSER_PROFILE_SWITCH_FAILED",
+        "Some browsers could not switch to temporary profiles. The profile was kept. Browsers already switched remain temporary; please try again.");
+    }
+  };
+
   const clearProfileData = async (
     profileId: BrowserProfileId,
   ): Promise<void> => {
@@ -4289,7 +4323,13 @@ export function createBrowserViewHost(
               const targetTabId = targetEntry.tabId;
               await targetEntry.ready;
               const targetBeforeAction = agentActionTarget(targetEntry);
+              const activationRevision = session.activationRevision;
               let result: Record<string, unknown>;
+              if (nativeAction === "tab-select") {
+                // A failed selection may still have changed the native target.
+                // Require fresh synchronization before the next page action.
+                session.nativeActiveTabId = undefined;
+              }
               try {
                 result = await options.agentBrowserRuntime!.runAction(
                   sessionId,
@@ -4319,6 +4359,15 @@ export function createBrowserViewHost(
                 typeof nativeArgs.tabId === "string"
               ) {
                 session.nativeActiveTabId = nativeArgs.tabId;
+                const requestedEntry = session.tabs.get(nativeArgs.tabId);
+                // An in-flight command must not overwrite a newer human selection,
+                // even if they switched away and back to the original tab.
+                if (
+                  session.activationRevision === activationRevision &&
+                  requestedEntry && requestedEntry.agentTab === undefined
+                ) {
+                  activateTab(session, nativeArgs.tabId);
+                }
               }
               if (nativeAction === "tab-new" || nativeAction === "tab-close") {
                 session.nativeActiveTabId = undefined;
@@ -4935,6 +4984,8 @@ export function createBrowserViewHost(
     refreshProfileState,
     getProfileSwitchInfo,
     switchProfile,
+    getProfileUsage,
+    detachProfile,
     isProfileLive,
     clearProfileData,
     isLastUsedBrowser: () =>
