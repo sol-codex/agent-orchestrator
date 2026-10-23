@@ -129,11 +129,6 @@ func TestInvalidEnrollmentAndBindFailureFailClosed(t *testing.T) {
 }
 
 func TestEnrollmentRequiresDistinctSpecificAccountSIDs(t *testing.T) {
-	service := testEnrollment()
-	service.ServiceSID = "S-1-5-80-1000-2000-3000-4000-5000"
-	if _, err := Handler(service); err != nil {
-		t.Fatalf("specific service SID rejected: %v", err)
-	}
 	for _, tc := range []struct{ service, bridge string }{
 		{"", "S-1-5-21-1000-2000-3000-1002"},
 		{"S-1-5-21-1000-2000-3000-1001", ""},
@@ -141,6 +136,7 @@ func TestEnrollmentRequiresDistinctSpecificAccountSIDs(t *testing.T) {
 		{"S-1-5-11", "S-1-5-21-1000-2000-3000-1002"},
 		{"S-1-5-32-544", "S-1-5-21-1000-2000-3000-1002"},
 		{"S-1-5-21-1000-2000-3000-513", "S-1-5-21-1000-2000-3000-1002"},
+		{"S-1-5-80-1000-2000-3000-4000-5000", "S-1-5-21-1000-2000-3000-1002"},
 		{"S-1-5-21-1000-2000-3000-1001", "S-1-5-21-1000-2000-3000-1001"},
 		{"S-1-5-21-1000-2000-3000-1001)(A;;GA;;;WD", "S-1-5-21-1000-2000-3000-1002"},
 	} {

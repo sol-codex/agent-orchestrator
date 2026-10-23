@@ -17,6 +17,17 @@ import (
 // or LAN route. The DACL excludes other accounts, while Handler's independent
 // credential distinguishes the enrolled bridge from other permitted clients.
 func Listen(runFilePath string, enrollment *Enrollment) (net.Listener, string, error) {
+	return listenWithAccountLookup(runFilePath, enrollment, func(sid *windows.SID) (uint32, error) {
+		_, _, accountType, err := sid.LookupAccount("")
+		return accountType, err
+	})
+}
+
+type accountTypeLookup func(*windows.SID) (uint32, error)
+
+const bridgePipeAccess = windows.FILE_READ_DATA | windows.FILE_WRITE_DATA | windows.SYNCHRONIZE
+
+func listenWithAccountLookup(runFilePath string, enrollment *Enrollment, lookup accountTypeLookup) (net.Listener, string, error) {
 	if !validEnrollment(enrollment) {
 		return nil, "", ErrInvalidEnrollment
 	}
@@ -27,6 +38,12 @@ func Listen(runFilePath string, enrollment *Enrollment) (net.Listener, string, e
 	bridgeSID, err := windows.StringToSid(enrollment.BridgeSID)
 	if err != nil || bridgeSID.String() != enrollment.BridgeSID {
 		return nil, "", ErrInvalidEnrollment
+	}
+	for _, sid := range []*windows.SID{serviceSID, bridgeSID} {
+		accountType, err := lookup(sid)
+		if err != nil || accountType != windows.SidTypeUser {
+			return nil, "", ErrInvalidEnrollment
+		}
 	}
 	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
@@ -53,7 +70,8 @@ func Listen(runFilePath string, enrollment *Enrollment) (net.Listener, string, e
 }
 
 func pipeSecurityDescriptor(e *Enrollment) string {
-	// The bridge needs bidirectional pipe access. The independent bearer still
-	// gates HTTP; the DACL limits which account can reach that check.
-	return "D:P(A;;GA;;;SY)(A;;GA;;;" + e.ServiceSID + ")(A;;GRGW;;;" + e.BridgeSID + ")"
+	// Generic write contains FILE_APPEND_DATA, which also grants the right to
+	// create a server pipe instance. The bridge receives only client data and
+	// synchronization rights; its dialer must request this exact access mask.
+	return fmt.Sprintf("D:P(A;;GA;;;SY)(A;;GA;;;%s)(A;;0x%X;;;%s)", e.ServiceSID, bridgePipeAccess, e.BridgeSID)
 }

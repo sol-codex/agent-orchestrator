@@ -40,7 +40,7 @@ func validEnrollment(e *Enrollment) bool {
 	return subtle.ConstantTimeCompare(e.Key[:], zero[:]) != 1
 }
 
-var accountSID = regexp.MustCompile(`^S-1-5-(?:21-(?:[0-9]{1,10}-){3}[0-9]{1,10}|80-(?:[0-9]{1,10}-){4}[0-9]{1,10})$`)
+var accountSID = regexp.MustCompile(`^S-1-5-21-(?:[0-9]{1,10}-){3}[0-9]{1,10}$`)
 
 // Accept only explicit account/service identities, never well-known broad groups.
 // Windows parses the SID again before the pipe is bound.
@@ -48,14 +48,11 @@ func validAccountSID(s string) bool {
 	if !accountSID.MatchString(s) {
 		return false
 	}
-	// Domain/local built-in group RIDs are below 1000. This deliberately
-	// excludes built-in Administrator too: enrollment requires a dedicated ID.
-	if strings.HasPrefix(s, "S-1-5-21-") {
-		rid := s[strings.LastIndexByte(s, '-')+1:]
-		value, err := strconv.ParseUint(rid, 10, 32)
-		return err == nil && value >= 1000
-	}
-	return true
+	// Exclude built-in identities. The Windows listener separately resolves
+	// both SIDs and requires SidTypeUser, rejecting custom high-RID groups.
+	rid := s[strings.LastIndexByte(s, '-')+1:]
+	value, err := strconv.ParseUint(rid, 10, 32)
+	return err == nil && value >= 1000
 }
 
 // Handler exposes only an authenticated inert status response. Do not add

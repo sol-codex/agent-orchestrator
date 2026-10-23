@@ -5,6 +5,7 @@ package hubcontrol
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -30,11 +31,17 @@ func currentAccountSID(t *testing.T) string {
 	return user.User.Sid.String()
 }
 
+func testListen(runFilePath string, e *Enrollment) (net.Listener, string, error) {
+	return listenWithAccountLookup(runFilePath, e, func(*windows.SID) (uint32, error) {
+		return windows.SidTypeUser, nil
+	})
+}
+
 func TestWindowsProtectedPipeBindsAndAcceptsOwner(t *testing.T) {
 	runFile := t.TempDir() + `\running.json`
 	e := testEnrollment()
 	e.ServiceSID = currentAccountSID(t)
-	ln, name, err := Listen(runFile, e)
+	ln, name, err := testListen(runFile, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +57,9 @@ func TestWindowsProtectedPipeBindsAndAcceptsOwner(t *testing.T) {
 		}
 		accepted <- err
 	}()
-	timeout := 5 * time.Second
-	conn, err := winio.DialPipe(name, &timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := winio.DialPipeAccess(ctx, name, bridgePipeAccess)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +76,7 @@ func TestWindowsHTTPOverProtectedPipeRequiresCredential(t *testing.T) {
 	defer cancel()
 	var name string
 	enabled, err := start(ctx, t.TempDir()+`\running.json`, enrollment, func(runFilePath string, e *Enrollment) (net.Listener, string, error) {
-		ln, addr, err := Listen(runFilePath, e)
+		ln, addr, err := testListen(runFilePath, e)
 		name = addr
 		return ln, addr, err
 	})
@@ -76,8 +84,9 @@ func TestWindowsHTTPOverProtectedPipeRequiresCredential(t *testing.T) {
 		t.Fatalf("start enabled=%v err=%v", enabled, err)
 	}
 	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
-		timeout := 5 * time.Second
-		return winio.DialPipe(name, &timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return winio.DialPipeAccess(ctx, name, bridgePipeAccess)
 	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
@@ -137,7 +146,7 @@ func TestWindowsPipeRejectsWrongServerIdentityBeforeBind(t *testing.T) {
 	if e.ServiceSID == currentAccountSID(t) {
 		t.Fatal("fixture unexpectedly matches current account")
 	}
-	ln, name, err := Listen(t.TempDir()+`\running.json`, e)
+	ln, name, err := testListen(t.TempDir()+`\running.json`, e)
 	if err == nil || ln != nil || name != "" {
 		t.Fatalf("wrong identity bound pipe: %q %v", name, err)
 	}
@@ -145,8 +154,55 @@ func TestWindowsPipeRejectsWrongServerIdentityBeforeBind(t *testing.T) {
 
 func TestWindowsPipeSecurityDescriptorUsesOnlyExplicitIdentities(t *testing.T) {
 	e := testEnrollment()
-	want := "D:P(A;;GA;;;SY)(A;;GA;;;" + e.ServiceSID + ")(A;;GRGW;;;" + e.BridgeSID + ")"
-	if got := pipeSecurityDescriptor(e); got != want || strings.Contains(got, ";;;OW") || strings.Contains(got, ";;;WD") {
+	want := "D:P(A;;GA;;;SY)(A;;GA;;;" + e.ServiceSID + ")(A;;0x100003;;;" + e.BridgeSID + ")"
+	if got := pipeSecurityDescriptor(e); got != want || bridgePipeAccess&windows.FILE_APPEND_DATA != 0 ||
+		strings.Contains(got, ";;;OW") || strings.Contains(got, ";;;WD") || strings.Contains(got, "GRGW") {
 		t.Fatalf("unexpected pipe DACL: %q", got)
+	}
+}
+
+func TestWindowsPipeRejectsGroupAndUnmappedSIDBeforeBind(t *testing.T) {
+	e := testEnrollment()
+	e.ServiceSID = currentAccountSID(t)
+	for _, tc := range []struct {
+		name   string
+		lookup accountTypeLookup
+	}{
+		{"custom high RID group", func(sid *windows.SID) (uint32, error) {
+			if sid.String() == e.BridgeSID {
+				return windows.SidTypeGroup, nil
+			}
+			return windows.SidTypeUser, nil
+		}},
+		{"unmapped bridge", func(sid *windows.SID) (uint32, error) {
+			if sid.String() == e.BridgeSID {
+				return 0, windows.ERROR_NONE_MAPPED
+			}
+			return windows.SidTypeUser, nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ln, name, err := listenWithAccountLookup(t.TempDir()+`\running.json`, e, tc.lookup)
+			if err == nil || ln != nil || name != "" {
+				t.Fatalf("invalid account bound pipe: %q %v", name, err)
+			}
+		})
+	}
+}
+
+func TestWindowsProductionLookupRejectsUnmappedBridge(t *testing.T) {
+	e := testEnrollment()
+	e.ServiceSID = currentAccountSID(t)
+	serviceSID, err := windows.StringToSid(e.ServiceSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, accountType, err := serviceSID.LookupAccount("")
+	if err != nil || accountType != windows.SidTypeUser {
+		t.Fatalf("current process SID did not resolve to a user: type=%d err=%v", accountType, err)
+	}
+	ln, name, err := Listen(t.TempDir()+`\running.json`, e)
+	if !errors.Is(err, ErrInvalidEnrollment) || ln != nil || name != "" {
+		t.Fatalf("unmapped bridge bound production pipe: %q %v", name, err)
 	}
 }
