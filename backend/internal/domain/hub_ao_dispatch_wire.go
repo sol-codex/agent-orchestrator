@@ -497,14 +497,22 @@ func MatchHubAOReceiptToPermit(receipt HubAOReceipt, permit HubAOPermit) error {
 func rejectUnpairedJSONSurrogates(raw []byte) error {
 	inString := false
 	for i := 0; i < len(raw); i++ {
-		if raw[i] == '"' {
-			inString = !inString
+		if !inString {
+			if raw[i] == '"' {
+				inString = true
+			}
 			continue
 		}
-		if !inString || raw[i] != '\\' || i+1 >= len(raw) {
+		if raw[i] == '"' {
+			inString = false
+			continue
+		}
+		if raw[i] != '\\' || i+1 >= len(raw) {
 			continue
 		}
 		i++
+		// A backslash escapes exactly the next byte. In particular, an
+		// escaped quote must not end the JSON string.
 		if raw[i] != 'u' || i+4 >= len(raw) {
 			continue
 		}

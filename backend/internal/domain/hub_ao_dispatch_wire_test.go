@@ -157,6 +157,8 @@ func TestHubAOWireUnicodeAndStrictShape(t *testing.T) {
 		patchHubAOWire(t, fixture.Grant, "unexpected", "planning text"),
 		bytes.Replace(fixture.Grant, []byte("grant-1"), []byte(`grant-\ud800`), 1),
 		bytes.Replace(fixture.Grant, []byte("grant-1"), []byte(`grant-\udc00`), 1),
+		bytes.Replace(fixture.Grant, []byte("grant-1"), []byte(`grant-\"suffix\ud800`), 1),
+		bytes.Replace(fixture.Grant, []byte("grant-1"), []byte(`grant-\"suffix\udc00`), 1),
 		patchHubAOWire(t, fixture.Grant, "grantId", " grant-1"),
 		patchHubAOWire(t, fixture.Grant, "hostGeneration", 9007199254740992),
 		patchHubAOWire(t, fixture.Grant, "prepareId", "bad/path"),
