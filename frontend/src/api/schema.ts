@@ -5828,6 +5828,7 @@ export interface components {
             graphId: string;
             prepareId: string;
             projectId: string;
+            receiptIdentitySha256: string;
             status: string;
         };
         DomainReviewerConfig: {

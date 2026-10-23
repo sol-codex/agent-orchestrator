@@ -207,7 +207,7 @@ func (s *Store) PrepareExecutionGraph(ctx context.Context, prepareID string, gra
 		if _, err := db.ExecContext(ctx, `INSERT INTO prepared_execution_graphs(id,project_id,graph_json,created_at,prepare_id,graph_bytes_sha256,receipt_identity_sha256) VALUES(?,?,?,?,?,?,?)`, graph.ID, string(graph.ProjectID), string(body), now, prepareID, digest, receiptDigest); err != nil {
 			return err
 		}
-		receipt = domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, GraphBytesSHA256: digest, Status: "prepared", CreatedAt: now}
+		receipt = domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, GraphBytesSHA256: digest, ReceiptIdentitySHA256: receiptDigest, Status: "prepared", CreatedAt: now}
 		created = true
 		return nil
 	})
@@ -265,7 +265,7 @@ func verifiedPreparedReceipt(prepareID, graphID, projectID, digest, receiptDiges
 	if string(canonical) != graphJSON || hex.EncodeToString(hash[:]) != digest || graph.ID != graphID || string(graph.ProjectID) != projectID {
 		return receipt, fmt.Errorf("prepared graph %q failed stored-byte integrity check", graphID)
 	}
-	return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graphID, ProjectID: domain.ProjectID(projectID), GraphBytesSHA256: digest, Status: "prepared", CreatedAt: createdAt}, nil
+	return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graphID, ProjectID: domain.ProjectID(projectID), GraphBytesSHA256: digest, ReceiptIdentitySHA256: receiptDigest, Status: "prepared", CreatedAt: createdAt}, nil
 }
 
 func preparedReceiptIdentityDigest(prepareID, graphID, projectID, graphDigest string, createdAt time.Time) (string, error) {

@@ -87,8 +87,17 @@ func TestPreparedExecutionGraphIsInertAcrossStoreReopen(t *testing.T) {
 	if err != nil || created {
 		t.Fatalf("retry created=%v err=%v", created, err)
 	}
-	if receipt != retryReceipt || receipt.GraphBytesSHA256 == "" || receipt.Status != "prepared" {
+	if receipt != retryReceipt || receipt.GraphBytesSHA256 == "" || receipt.ReceiptIdentitySHA256 == "" || receipt.Status != "prepared" {
 		t.Fatalf("unstable receipt: %#v %#v", receipt, retryReceipt)
+	}
+	identityBytes, err := json.Marshal([]string{"ao.prepared-receipt/1", receipt.PrepareID, receipt.GraphID, string(receipt.ProjectID), receipt.GraphBytesSHA256, receipt.CreatedAt.UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityHash := sha256.Sum256(identityBytes)
+	expectedReceiptDigest := hex.EncodeToString(identityHash[:])
+	if receipt.ReceiptIdentitySHA256 != expectedReceiptDigest {
+		t.Fatalf("public receipt identity digest=%s err=%v", receipt.ReceiptIdentitySHA256, err)
 	}
 	fullGraphBytes, err := json.Marshal(graph)
 	if err != nil {
@@ -200,6 +209,7 @@ func TestPreparedExecutionGraphReceiptRejectsCorruptMetadata(t *testing.T) {
 	}{
 		{name: "prepare ID", column: "prepare_id", lookupID: "prep-forged", value: "prep-forged"},
 		{name: "creation time", column: "created_at", lookupID: "prep-original", value: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "receipt digest", column: "receipt_identity_sha256", lookupID: "prep-original", value: strings.Repeat("9", 64)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dataDir := t.TempDir()

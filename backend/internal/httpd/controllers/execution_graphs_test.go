@@ -37,7 +37,7 @@ type fakeExecutionGraphStore struct {
 }
 
 func (f *fakeExecutionGraphStore) PrepareExecutionGraph(_ context.Context, prepareID string, graph domain.ExecutionGraph) (domain.PreparedExecutionGraphReceipt, bool, error) {
-	receipt := domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, Status: "prepared"}
+	receipt := domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, ReceiptIdentitySHA256: strings.Repeat("8", 64), Status: "prepared"}
 	if f.saveErr != nil {
 		return receipt, false, f.saveErr
 	}
@@ -74,7 +74,7 @@ func (f *fakeExecutionGraphStore) GetPreparedExecutionGraph(_ context.Context, i
 	}
 	for prepareID, graphID := range f.prepareIDs {
 		if graphID == id {
-			return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, Status: "prepared"}, true, nil
+			return domain.PreparedExecutionGraphReceipt{PrepareID: prepareID, GraphID: graph.ID, ProjectID: graph.ProjectID, ReceiptIdentitySHA256: strings.Repeat("8", 64), Status: "prepared"}, true, nil
 		}
 	}
 	return domain.PreparedExecutionGraphReceipt{}, false, nil
@@ -274,14 +274,14 @@ func TestPrepareExecutionGraphNeverWakesAndRetriesIdempotently(t *testing.T) {
 		if rec.Code != want || wakes != 0 || len(store.graphs) != 0 || len(store.prepared) != 1 {
 			t.Fatalf("prepare %d status=%d wakes=%d active=%d prepared=%d body=%s", i, rec.Code, wakes, len(store.graphs), len(store.prepared), rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), `"prepareId":"prep-1"`) || !strings.Contains(rec.Body.String(), `"status":"prepared"`) {
+		if !strings.Contains(rec.Body.String(), `"prepareId":"prep-1"`) || !strings.Contains(rec.Body.String(), `"receiptIdentitySha256":"`+strings.Repeat("8", 64)+`"`) || !strings.Contains(rec.Body.String(), `"status":"prepared"`) {
 			t.Fatalf("prepare receipt missing: %s", rec.Body.String())
 		}
 	}
 	for _, path := range []string{"/execution-graphs/prepared/prep-1", "/execution-graphs/" + graph.ID + "/preparation"} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, requestJSON(t, http.MethodGet, path, nil))
-		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"prepareId":"prep-1"`) {
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"prepareId":"prep-1"`) || !strings.Contains(rec.Body.String(), `"receiptIdentitySha256":"`+strings.Repeat("8", 64)+`"`) {
 			t.Fatalf("lookup %s: status=%d body=%s", path, rec.Code, rec.Body.String())
 		}
 	}

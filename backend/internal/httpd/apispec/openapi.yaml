@@ -17122,6 +17122,8 @@ components:
           type: string
         projectId:
           type: string
+        receiptIdentitySha256:
+          type: string
         status:
           type: string
       required:
@@ -17129,6 +17131,7 @@ components:
       - graphId
       - projectId
       - graphBytesSha256
+      - receiptIdentitySha256
       - status
       - createdAt
       type: object

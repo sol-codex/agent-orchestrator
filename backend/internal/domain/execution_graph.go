@@ -45,12 +45,13 @@ type ExecutionGraph struct {
 // digest is SHA-256 of AO's JSON encoding of the entire ExecutionGraph. It is
 // distinct from the A1 graphContractDigest, which excludes runtime facts.
 type PreparedExecutionGraphReceipt struct {
-	PrepareID        string    `json:"prepareId"`
-	GraphID          string    `json:"graphId"`
-	ProjectID        ProjectID `json:"projectId"`
-	GraphBytesSHA256 string    `json:"graphBytesSha256"`
-	Status           string    `json:"status"`
-	CreatedAt        time.Time `json:"createdAt"`
+	PrepareID             string    `json:"prepareId"`
+	GraphID               string    `json:"graphId"`
+	ProjectID             ProjectID `json:"projectId"`
+	GraphBytesSHA256      string    `json:"graphBytesSha256"`
+	ReceiptIdentitySHA256 string    `json:"receiptIdentitySha256"`
+	Status                string    `json:"status"`
+	CreatedAt             time.Time `json:"createdAt"`
 }
 
 // ExecutionSlice groups independently useful work. Task dependencies, rather
