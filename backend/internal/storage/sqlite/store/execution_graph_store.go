@@ -54,6 +54,16 @@ func (s *Store) SaveExecutionGraph(ctx context.Context, graph domain.ExecutionGr
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		// Hub-origin graphs remain sealed after activation. The ordinary graph
+		// import/update API cannot become an alternate authority path.
+		var activatedID string
+		err = db.QueryRowContext(ctx, `SELECT graph_id FROM hub_ao_activations WHERE graph_id=?`, graph.ID).Scan(&activatedID)
+		if err == nil {
+			return execution.ErrGraphConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		old, found, err := readExecutionGraph(ctx, db, graph.ID)
 		if err != nil {
 			return err
