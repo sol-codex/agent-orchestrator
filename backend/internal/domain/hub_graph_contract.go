@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // HubGraphContractDigest hashes only the immutable planning fields of an AO
@@ -20,7 +21,7 @@ func HubGraphContractDigest(graph ExecutionGraph) (string, error) {
 	for _, slice := range graph.Slices {
 		slices = append(slices, map[string]any{
 			"id": slice.ID, "objective": slice.Objective, "scope": slice.Scope,
-			"deliverables": nonNilStrings(slice.Deliverables),
+			"deliverables":       nonNilStrings(slice.Deliverables),
 			"acceptanceCriteria": nonNilStrings(slice.AcceptanceCriteria),
 		})
 	}
@@ -29,23 +30,26 @@ func HubGraphContractDigest(graph ExecutionGraph) (string, error) {
 		tasks = append(tasks, map[string]any{
 			"id": task.ID, "sliceId": task.SliceID, "objective": task.Objective,
 			"scope": task.Scope, "deliverables": nonNilStrings(task.Deliverables),
-			"acceptanceCriteria": nonNilStrings(task.AcceptanceCriteria),
-			"dependencies": nonNilStrings(task.Dependencies),
-			"softDependencies": nonNilStrings(task.SoftDependencies),
-			"priority": task.Priority,
+			"acceptanceCriteria":      nonNilStrings(task.AcceptanceCriteria),
+			"dependencies":            nonNilStrings(task.Dependencies),
+			"softDependencies":        nonNilStrings(task.SoftDependencies),
+			"priority":                task.Priority,
 			"recommendedCapabilities": nonNilStrings(task.RecommendedCapabilities),
-			"preferredAgent": task.PreferredAgent,
-			"fallbackAgents": nonNilStrings(task.FallbackAgents),
-			"resources": nonNilStrings(task.Resources),
+			"preferredAgent":          task.PreferredAgent,
+			"fallbackAgents":          nonNilStrings(task.FallbackAgents),
+			"resources":               nonNilStrings(task.Resources),
 			"integrationRequirements": nonNilStrings(task.IntegrationRequirements),
-			"validationProcedures": nonNilStrings(task.ValidationProcedures),
-			"complexity": task.Complexity,
+			"validationProcedures":    nonNilStrings(task.ValidationProcedures),
+			"complexity":              task.Complexity,
 		})
 	}
 	projection := map[string]any{
 		"schemaVersion": graph.SchemaVersion, "id": graph.ID,
 		"projectId": string(graph.ProjectID), "objective": graph.Objective,
 		"slices": slices, "tasks": tasks,
+	}
+	if err := validateHubGraphJSONStrings(projection); err != nil {
+		return "", err
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -54,13 +58,39 @@ func HubGraphContractDigest(graph ExecutionGraph) (string, error) {
 		return "", fmt.Errorf("encode Hub graph contract: %w", err)
 	}
 	canonical := strings.TrimSuffix(buf.String(), "\n")
-	// Go and JavaScript differ on U+2028/U+2029 JSON escaping. Refuse these
-	// rare strings until the two codecs share a full canonical JSON standard.
-	if strings.Contains(canonical, `\u2028`) || strings.Contains(canonical, `\u2029`) {
-		return "", fmt.Errorf("Hub graph contract: U+2028 and U+2029 are unsupported")
-	}
 	sum := sha256.Sum256([]byte("hub.ao-graph-contract/1\n" + canonical))
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func validateHubGraphJSONStrings(value any) error {
+	switch value := value.(type) {
+	case string:
+		if !utf8.ValidString(value) {
+			return fmt.Errorf("Hub graph contract: invalid UTF-8 is unsupported")
+		}
+		if strings.ContainsAny(value, "\u2028\u2029") {
+			return fmt.Errorf("Hub graph contract: U+2028 and U+2029 are unsupported")
+		}
+	case []string:
+		for _, item := range value {
+			if err := validateHubGraphJSONStrings(item); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range value {
+			if err := validateHubGraphJSONStrings(item); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for _, item := range value {
+			if err := validateHubGraphJSONStrings(item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func nonNilStrings(items []string) []string {
