@@ -1,10 +1,10 @@
 {
-  "hubContractHead": "6f5bab472c87080af1b3a27c26dc21c4f7108d3a",
-  "expectedGrantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d",
+  "hubContractHead": "b719698dfa6edd7b785adf011935a22df8cdbc96",
+  "expectedGrantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
   "observedAt": "2026-10-23T15:01:00.000Z",
   "grant": {
     "contractVersion": "hub.ao-dispatch/1",
-    "grantId": "grant-é🚀 line<>&",
+    "grantId": "grant-1",
     "graphId": "graph-1",
     "projectId": "project-1",
     "planId": "plan-1",
@@ -18,7 +18,7 @@
     "repositoryRevisions": [
       {
         "repositoryId": "hub",
-        "remote": "origin/é🚀 branch",
+        "remote": "origin",
         "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     ],
@@ -31,12 +31,16 @@
     "issuedAt": "2026-10-23T15:00:00.000Z",
     "expiresAt": "2026-10-23T15:10:00.000Z",
     "oneUse": true,
-    "grantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d"
+    "grantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
+    "prepareId": "prepare-1",
+    "graphBytesSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "receiptIdentitySha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "storeId": "ao-store-1"
   },
   "permit": {
     "contractVersion": "hub.ao-dispatch/1",
-    "grantId": "grant-é🚀 line<>&",
-    "grantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d",
+    "grantId": "grant-1",
+    "grantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
     "redemptionId": "redemption-1",
     "graphId": "graph-1",
     "projectId": "project-1",
@@ -50,12 +54,17 @@
       "scheme": "signature",
       "keyId": "hub-key-1",
       "bytes": "opaque-proof"
-    }
+    },
+    "prepareId": "prepare-1",
+    "graphBytesSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "receiptIdentitySha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "storeId": "ao-store-1",
+    "authorityEpoch": 3
   },
   "receipt": {
     "contractVersion": "hub.ao-dispatch/1",
-    "grantId": "grant-é🚀 line<>&",
-    "grantDigest": "e504e053e171a40c3fd25880f04a1c0230a30e5e8d15f96f91cf64215388975d",
+    "grantId": "grant-1",
+    "grantDigest": "d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4",
     "redemptionId": "redemption-1",
     "graphId": "graph-1",
     "projectId": "project-1",
@@ -66,7 +75,12 @@
     "activationId": "activation-1",
     "graphRevision": 1,
     "state": "active",
-    "activatedAt": "2026-10-23T15:01:20.000Z"
+    "activatedAt": "2026-10-23T15:01:20.000Z",
+    "prepareId": "prepare-1",
+    "graphBytesSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "receiptIdentitySha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "storeId": "ao-store-1",
+    "authorityEpoch": 3
   },
   "negative": [
     {
@@ -104,6 +118,91 @@
       "kind": "receipt",
       "field": "graphContractDigest",
       "value": "7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    {
+      "name": "wrong grant prepareId",
+      "kind": "grant",
+      "field": "prepareId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong grant graphBytesSha256",
+      "kind": "grant",
+      "field": "graphBytesSha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong grant receiptIdentitySha256",
+      "kind": "grant",
+      "field": "receiptIdentitySha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong grant storeId",
+      "kind": "grant",
+      "field": "storeId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong permit prepareId",
+      "kind": "permit",
+      "field": "prepareId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong permit graphBytesSha256",
+      "kind": "permit",
+      "field": "graphBytesSha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong permit receiptIdentitySha256",
+      "kind": "permit",
+      "field": "receiptIdentitySha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong permit storeId",
+      "kind": "permit",
+      "field": "storeId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong permit authorityEpoch",
+      "kind": "permit",
+      "field": "authorityEpoch",
+      "value": 4
+    },
+    {
+      "name": "wrong receipt prepareId",
+      "kind": "receipt",
+      "field": "prepareId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong receipt graphBytesSha256",
+      "kind": "receipt",
+      "field": "graphBytesSha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong receipt receiptIdentitySha256",
+      "kind": "receipt",
+      "field": "receiptIdentitySha256",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    {
+      "name": "wrong receipt storeId",
+      "kind": "receipt",
+      "field": "storeId",
+      "value": "changed"
+    },
+    {
+      "name": "wrong receipt authorityEpoch",
+      "kind": "receipt",
+      "field": "authorityEpoch",
+      "value": 4
     }
-  ]
+  ],
+  "expectedPermitSigningBytes": "hub.ao-activation-permit/1\n{\"authorityEpoch\":3,\"contractVersion\":\"hub.ao-dispatch/1\",\"grantDigest\":\"d60fc44839c173f087662026a01215a31b6298fffbde93a2a064c92c300aa7c4\",\"grantId\":\"grant-1\",\"graphBytesSha256\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"graphContractDigest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"graphId\":\"graph-1\",\"hostGeneration\":7,\"hostId\":\"laptop-1\",\"hubAOPlanBindingDigest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"issuedAt\":\"2026-10-23T15:01:00.000Z\",\"prepareId\":\"prepare-1\",\"projectId\":\"project-1\",\"proof\":{\"keyId\":\"hub-key-1\",\"scheme\":\"signature\"},\"receiptIdentitySha256\":\"8888888888888888888888888888888888888888888888888888888888888888\",\"redemptionId\":\"redemption-1\",\"storeId\":\"ao-store-1\",\"useBy\":\"2026-10-23T15:02:00.000Z\"}"
 }

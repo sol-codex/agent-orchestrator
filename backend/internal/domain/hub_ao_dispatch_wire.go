@@ -19,6 +19,7 @@ import (
 // not authenticate a Hub issuer, verify proof bytes, redeem a grant, or activate.
 const hubAODispatchVersion = "hub.ao-dispatch/1"
 const hubAOGrantDigestDomain = "hub.ao-dispatch-grant/1\n"
+const hubAOPermitSigningDomain = "hub.ao-activation-permit/1\n"
 
 type HubAORepositoryRevision struct {
 	RepositoryID string `json:"repositoryId"`
@@ -38,9 +39,13 @@ type HubAOGrantPayload struct {
 	ApprovalDigest            string                    `json:"approvalDigest"`
 	HubAOPlanBindingDigest    string                    `json:"hubAOPlanBindingDigest"`
 	GraphContractDigest       string                    `json:"graphContractDigest"`
+	PrepareID                 string                    `json:"prepareId"`
+	GraphBytesSHA256          string                    `json:"graphBytesSha256"`
+	ReceiptIdentitySHA256     string                    `json:"receiptIdentitySha256"`
 	HandoffSetDigest          string                    `json:"handoffSetDigest"`
 	RepositoryRevisions       []HubAORepositoryRevision `json:"repositoryRevisions"`
 	HostID                    string                    `json:"hostId"`
+	StoreID                   string                    `json:"storeId"`
 	HostGeneration            int64                     `json:"hostGeneration"`
 	AuthorityEpoch            int64                     `json:"authorityEpoch"`
 	IssuerOwnerID             string                    `json:"issuerOwnerId"`
@@ -70,9 +75,14 @@ type HubAOPermit struct {
 	GraphID                string     `json:"graphId"`
 	ProjectID              string     `json:"projectId"`
 	GraphContractDigest    string     `json:"graphContractDigest"`
+	PrepareID              string     `json:"prepareId"`
+	GraphBytesSHA256       string     `json:"graphBytesSha256"`
+	ReceiptIdentitySHA256  string     `json:"receiptIdentitySha256"`
 	HubAOPlanBindingDigest string     `json:"hubAOPlanBindingDigest"`
 	HostID                 string     `json:"hostId"`
+	StoreID                string     `json:"storeId"`
 	HostGeneration         int64      `json:"hostGeneration"`
+	AuthorityEpoch         int64      `json:"authorityEpoch"`
 	IssuedAt               string     `json:"issuedAt"`
 	UseBy                  string     `json:"useBy"`
 	Proof                  HubAOProof `json:"proof"`
@@ -86,9 +96,14 @@ type HubAOReceipt struct {
 	GraphID                string `json:"graphId"`
 	ProjectID              string `json:"projectId"`
 	GraphContractDigest    string `json:"graphContractDigest"`
+	PrepareID              string `json:"prepareId"`
+	GraphBytesSHA256       string `json:"graphBytesSha256"`
+	ReceiptIdentitySHA256  string `json:"receiptIdentitySha256"`
 	HubAOPlanBindingDigest string `json:"hubAOPlanBindingDigest"`
 	HostID                 string `json:"hostId"`
+	StoreID                string `json:"storeId"`
 	HostGeneration         int64  `json:"hostGeneration"`
+	AuthorityEpoch         int64  `json:"authorityEpoch"`
 	ActivationID           string `json:"activationId"`
 	GraphRevision          int64  `json:"graphRevision"`
 	State                  string `json:"state"`
@@ -116,8 +131,25 @@ func strictHubAOJSON(raw []byte, target any) error {
 	return nil
 }
 
+func requireHubAOFields(raw []byte, fields ...string) error {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return err
+	}
+	for _, field := range fields {
+		if _, ok := object[field]; !ok {
+			return fmt.Errorf("Hub AO wire: missing %s", field)
+		}
+	}
+	return nil
+}
+
 func validHubAOID(value string) bool {
 	return value != "" && utf8.ValidString(value) && strings.TrimFunc(value, jsTrimSpace) == value
+}
+
+func validHubAOPrepareID(value string) bool {
+	return validHubAOID(value) && len(value) <= 128 && !strings.ContainsAny(value, "/?#")
 }
 
 func jsTrimSpace(r rune) bool {
@@ -153,13 +185,15 @@ func (p HubAOGrantPayload) validate() error {
 	if p.ContractVersion != hubAODispatchVersion || !p.OneUse ||
 		!validHubAOID(p.GrantID) || !validHubAOID(p.GraphID) || !validHubAOID(p.ProjectID) ||
 		!validHubAOID(p.PlanID) || !validHubAOID(p.PlanRevision) || !validHubAOID(p.ApprovalID) ||
-		!validHubAOID(p.HostID) || !validHubAOID(p.IssuerOwnerID) || !validHubAOID(p.OwnerAuthorizationEventID) ||
+		!validHubAOID(p.HostID) || !validHubAOID(p.StoreID) || !validHubAOPrepareID(p.PrepareID) ||
+		!validHubAOID(p.IssuerOwnerID) || !validHubAOID(p.OwnerAuthorizationEventID) ||
 		p.OwnerAuthorizationEventID == p.ApprovalID || p.HostGeneration <= 0 || p.HostGeneration > 9007199254740991 ||
 		p.AuthorityEpoch < 0 || p.AuthorityEpoch > 9007199254740991 {
 		return errors.New("Hub AO grant: invalid identity")
 	}
 	for _, digest := range []string{p.PlanContentDigest, p.ApprovalDigest, p.HubAOPlanBindingDigest,
-		p.GraphContractDigest, p.HandoffSetDigest, p.OwnerAuthorizationDigest} {
+		p.GraphContractDigest, p.GraphBytesSHA256, p.ReceiptIdentitySHA256,
+		p.HandoffSetDigest, p.OwnerAuthorizationDigest} {
 		if !validLowerHex(digest, 64) {
 			return errors.New("Hub AO grant: invalid digest")
 		}
@@ -295,6 +329,9 @@ func ParseHubAOGrant(raw []byte) (HubAOGrant, error) {
 	if err := strictHubAOJSON(raw, &grant); err != nil {
 		return grant, err
 	}
+	if err := requireHubAOFields(raw, "prepareId", "graphBytesSha256", "receiptIdentitySha256", "storeId", "authorityEpoch"); err != nil {
+		return grant, err
+	}
 	digest, err := HubAOGrantDigest(grant.HubAOGrantPayload)
 	if err != nil {
 		return grant, err
@@ -310,10 +347,16 @@ func ParseHubAOPermit(raw []byte) (HubAOPermit, error) {
 	if err := strictHubAOJSON(raw, &permit); err != nil {
 		return permit, err
 	}
+	if err := requireHubAOFields(raw, "prepareId", "graphBytesSha256", "receiptIdentitySha256", "storeId", "authorityEpoch"); err != nil {
+		return permit, err
+	}
 	if permit.ContractVersion != hubAODispatchVersion || !validHubAOID(permit.GrantID) || !validHubAOID(permit.RedemptionID) ||
 		!validHubAOID(permit.GraphID) || !validHubAOID(permit.ProjectID) || !validHubAOID(permit.HostID) ||
+		!validHubAOID(permit.StoreID) || !validHubAOPrepareID(permit.PrepareID) ||
 		!validLowerHex(permit.GrantDigest, 64) || !validLowerHex(permit.GraphContractDigest, 64) ||
+		!validLowerHex(permit.GraphBytesSHA256, 64) || !validLowerHex(permit.ReceiptIdentitySHA256, 64) ||
 		!validLowerHex(permit.HubAOPlanBindingDigest, 64) || permit.HostGeneration <= 0 || permit.HostGeneration > 9007199254740991 ||
+		permit.AuthorityEpoch < 0 || permit.AuthorityEpoch > 9007199254740991 ||
 		!validHubAOID(permit.Proof.KeyID) || !validHubAOID(permit.Proof.Bytes) ||
 		permit.Proof.Scheme != "signature" && permit.Proof.Scheme != "mac" {
 		return permit, errors.New("Hub AO permit: invalid shape")
@@ -329,15 +372,43 @@ func ParseHubAOPermit(raw []byte) (HubAOPermit, error) {
 	return permit, nil
 }
 
+// HubAOPermitSigningBytes mirrors Hub's domain-separated permit bytes. It
+// establishes a byte contract only; callers must authenticate the proof.
+func HubAOPermitSigningBytes(permit HubAOPermit) (string, error) {
+	raw, err := json.Marshal(permit)
+	if err != nil {
+		return "", err
+	}
+	if _, err := ParseHubAOPermit(raw); err != nil {
+		return "", err
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", err
+	}
+	value["proof"] = map[string]any{"scheme": permit.Proof.Scheme, "keyId": permit.Proof.KeyID}
+	var canonical bytes.Buffer
+	if err := writeHubCanonicalJSON(&canonical, value); err != nil {
+		return "", err
+	}
+	return hubAOPermitSigningDomain + canonical.String(), nil
+}
+
 func ParseHubAOReceipt(raw []byte) (HubAOReceipt, error) {
 	var receipt HubAOReceipt
 	if err := strictHubAOJSON(raw, &receipt); err != nil {
 		return receipt, err
 	}
+	if err := requireHubAOFields(raw, "prepareId", "graphBytesSha256", "receiptIdentitySha256", "storeId", "authorityEpoch"); err != nil {
+		return receipt, err
+	}
 	if receipt.ContractVersion != hubAODispatchVersion || !validHubAOID(receipt.GrantID) || !validHubAOID(receipt.RedemptionID) ||
 		!validHubAOID(receipt.GraphID) || !validHubAOID(receipt.ProjectID) || !validHubAOID(receipt.HostID) || !validHubAOID(receipt.ActivationID) ||
+		!validHubAOID(receipt.StoreID) || !validHubAOPrepareID(receipt.PrepareID) ||
 		!validLowerHex(receipt.GrantDigest, 64) || !validLowerHex(receipt.GraphContractDigest, 64) ||
+		!validLowerHex(receipt.GraphBytesSHA256, 64) || !validLowerHex(receipt.ReceiptIdentitySHA256, 64) ||
 		!validLowerHex(receipt.HubAOPlanBindingDigest, 64) || receipt.HostGeneration <= 0 || receipt.HostGeneration > 9007199254740991 ||
+		receipt.AuthorityEpoch < 0 || receipt.AuthorityEpoch > 9007199254740991 ||
 		receipt.GraphRevision <= 0 || receipt.GraphRevision > 9007199254740991 || receipt.State != "active" {
 		return receipt, errors.New("Hub AO receipt: invalid shape")
 	}
@@ -377,8 +448,11 @@ func MatchHubAOPermitToGrant(permit HubAOPermit, grant HubAOGrant, observedAt st
 	}
 	if permit.GrantID != grant.GrantID || permit.GrantDigest != grant.GrantDigest || permit.GraphID != grant.GraphID ||
 		permit.ProjectID != grant.ProjectID || permit.GraphContractDigest != grant.GraphContractDigest ||
+		permit.PrepareID != grant.PrepareID || permit.GraphBytesSHA256 != grant.GraphBytesSHA256 ||
+		permit.ReceiptIdentitySHA256 != grant.ReceiptIdentitySHA256 ||
 		permit.HubAOPlanBindingDigest != grant.HubAOPlanBindingDigest || permit.HostID != grant.HostID ||
-		permit.HostGeneration != grant.HostGeneration {
+		permit.StoreID != grant.StoreID || permit.HostGeneration != grant.HostGeneration ||
+		permit.AuthorityEpoch != grant.AuthorityEpoch {
 		return errors.New("Hub AO permit: grant identity differs")
 	}
 	return nil
@@ -409,8 +483,11 @@ func MatchHubAOReceiptToPermit(receipt HubAOReceipt, permit HubAOPermit) error {
 	}
 	if receipt.GrantID != permit.GrantID || receipt.GrantDigest != permit.GrantDigest || receipt.RedemptionID != permit.RedemptionID ||
 		receipt.GraphID != permit.GraphID || receipt.ProjectID != permit.ProjectID ||
-		receipt.GraphContractDigest != permit.GraphContractDigest || receipt.HubAOPlanBindingDigest != permit.HubAOPlanBindingDigest ||
-		receipt.HostID != permit.HostID || receipt.HostGeneration != permit.HostGeneration {
+		receipt.GraphContractDigest != permit.GraphContractDigest || receipt.PrepareID != permit.PrepareID ||
+		receipt.GraphBytesSHA256 != permit.GraphBytesSHA256 || receipt.ReceiptIdentitySHA256 != permit.ReceiptIdentitySHA256 ||
+		receipt.HubAOPlanBindingDigest != permit.HubAOPlanBindingDigest ||
+		receipt.HostID != permit.HostID || receipt.StoreID != permit.StoreID ||
+		receipt.HostGeneration != permit.HostGeneration || receipt.AuthorityEpoch != permit.AuthorityEpoch {
 		return errors.New("Hub AO receipt: permit identity differs")
 	}
 	return nil

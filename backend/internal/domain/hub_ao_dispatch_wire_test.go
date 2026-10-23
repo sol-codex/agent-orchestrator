@@ -4,18 +4,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
 type hubAOWireFixture struct {
-	HubContractHead     string          `json:"hubContractHead"`
-	ExpectedGrantDigest string          `json:"expectedGrantDigest"`
-	ObservedAt          string          `json:"observedAt"`
-	Grant               json.RawMessage `json:"grant"`
-	Permit              json.RawMessage `json:"permit"`
-	Receipt             json.RawMessage `json:"receipt"`
-	Negative            []struct {
+	HubContractHead            string          `json:"hubContractHead"`
+	ExpectedGrantDigest        string          `json:"expectedGrantDigest"`
+	ExpectedPermitSigningBytes string          `json:"expectedPermitSigningBytes"`
+	ObservedAt                 string          `json:"observedAt"`
+	Grant                      json.RawMessage `json:"grant"`
+	Permit                     json.RawMessage `json:"permit"`
+	Receipt                    json.RawMessage `json:"receipt"`
+	Negative                   []struct {
 		Name  string `json:"name"`
 		Kind  string `json:"kind"`
 		Field string `json:"field"`
@@ -33,7 +33,7 @@ func loadHubAOWireFixture(t *testing.T) hubAOWireFixture {
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.HubContractHead != "6f5bab472c87080af1b3a27c26dc21c4f7108d3a" {
+	if fixture.HubContractHead != "b719698dfa6edd7b785adf011935a22df8cdbc96" {
 		t.Fatal("fixture Hub source head drift")
 	}
 	return fixture
@@ -52,15 +52,16 @@ func TestHubAOWireParityFixture(t *testing.T) {
 	if err != nil || calculated != fixture.ExpectedGrantDigest {
 		t.Fatalf("Go digest %s, err %v", calculated, err)
 	}
-	if !strings.Contains(grant.GrantID, "\u2028") || !strings.Contains(grant.RepositoryRevisions[0].Remote, "\u2029") {
-		t.Fatal("Unicode parity fixture lost line separators")
-	}
 	permit, err := ParseHubAOPermit(fixture.Permit)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := MatchHubAOPermitToGrant(permit, grant, fixture.ObservedAt); err != nil {
 		t.Fatal(err)
+	}
+	signingBytes, err := HubAOPermitSigningBytes(permit)
+	if err != nil || signingBytes != fixture.ExpectedPermitSigningBytes {
+		t.Fatalf("Hub/Go permit signing bytes differ: err %v, bytes %q", err, signingBytes)
 	}
 	receipt, err := ParseHubAOReceipt(fixture.Receipt)
 	if err != nil {
@@ -83,6 +84,37 @@ func patchHubAOWire(t *testing.T, raw json.RawMessage, field string, value any) 
 		t.Fatal(err)
 	}
 	return changed
+}
+
+func omitHubAOWireField(t *testing.T, raw json.RawMessage, field string) []byte {
+	t.Helper()
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatal(err)
+	}
+	delete(object, field)
+	changed, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return changed
+}
+
+func TestHubAOWireRequiredPreparedIdentity(t *testing.T) {
+	fixture := loadHubAOWireFixture(t)
+	for _, field := range []string{"prepareId", "graphBytesSha256", "receiptIdentitySha256", "storeId", "authorityEpoch"} {
+		t.Run(field, func(t *testing.T) {
+			if _, err := ParseHubAOGrant(omitHubAOWireField(t, fixture.Grant, field)); err == nil {
+				t.Fatal("grant omitted required field")
+			}
+			if _, err := ParseHubAOPermit(omitHubAOWireField(t, fixture.Permit, field)); err == nil {
+				t.Fatal("permit omitted required field")
+			}
+			if _, err := ParseHubAOReceipt(omitHubAOWireField(t, fixture.Receipt, field)); err == nil {
+				t.Fatal("receipt omitted required field")
+			}
+		})
+	}
 }
 
 func TestHubAOWireNegativeFixture(t *testing.T) {
@@ -123,19 +155,33 @@ func TestHubAOWireUnicodeAndStrictShape(t *testing.T) {
 	fixture := loadHubAOWireFixture(t)
 	for _, raw := range [][]byte{
 		patchHubAOWire(t, fixture.Grant, "unexpected", "planning text"),
-		bytes.Replace(fixture.Grant, []byte("grant-é🚀"), []byte(`grant-\ud800`), 1),
-		bytes.Replace(fixture.Grant, []byte("grant-é🚀"), []byte(`grant-\udc00`), 1),
+		bytes.Replace(fixture.Grant, []byte("grant-1"), []byte(`grant-\ud800`), 1),
+		bytes.Replace(fixture.Grant, []byte("grant-1"), []byte(`grant-\udc00`), 1),
 		patchHubAOWire(t, fixture.Grant, "grantId", " grant-1"),
 		patchHubAOWire(t, fixture.Grant, "hostGeneration", 9007199254740992),
+		patchHubAOWire(t, fixture.Grant, "prepareId", "bad/path"),
 	} {
 		if _, err := ParseHubAOGrant(raw); err == nil {
 			t.Fatal("invalid or nonportable grant accepted")
 		}
 	}
-	// A valid surrogate pair, literal Unicode, and JSON's U+2028 escape denote
-	// the same string and must reproduce Hub's digest.
-	escaped := bytes.Replace(fixture.Grant, []byte("é🚀"), []byte(`\u00e9\ud83d\ude80`), 1)
-	escaped = bytes.Replace(escaped, []byte("\u2028"), []byte(`\u2028`), 1)
+	// Escaping a valid Unicode string preserves the sealed digest.
+	grant, err := ParseHubAOGrant(fixture.Grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant.GrantID = "grant-é🚀\u2028line<>&"
+	grant.RepositoryRevisions[0].Remote = "origin/é🚀\u2029branch"
+	grant.GrantDigest, err = HubAOGrantDigest(grant.HubAOGrantPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal, err := json.Marshal(grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	escaped := bytes.ReplaceAll(literal, []byte("é🚀"), []byte(`\u00e9\ud83d\ude80`))
+	escaped = bytes.ReplaceAll(escaped, []byte("\u2028"), []byte(`\u2028`))
 	if _, err := ParseHubAOGrant(escaped); err != nil {
 		t.Fatalf("valid escaped Unicode rejected: %v", err)
 	}
@@ -156,6 +202,24 @@ func TestHubAOWireIdentityDoesNotAuthenticateOrConsume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalPermit, err := ParseHubAOPermit(fixture.Permit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBytes, err := HubAOPermitSigningBytes(originalPermit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alteredBytes, err := HubAOPermitSigningBytes(permit)
+	if err != nil || alteredBytes != originalBytes {
+		t.Fatalf("opaque proof bytes affected signed identity: %v", err)
+	}
+	permit.Proof.KeyID = "different-key"
+	differentKeyBytes, err := HubAOPermitSigningBytes(permit)
+	if err != nil || differentKeyBytes == originalBytes {
+		t.Fatalf("proof key identity did not affect signing bytes: %v", err)
+	}
+	permit.Proof.KeyID = originalPermit.Proof.KeyID
 	if err := MatchHubAOPermitToGrant(permit, grant, fixture.ObservedAt); err != nil {
 		t.Fatal(err)
 	}
