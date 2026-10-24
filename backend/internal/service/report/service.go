@@ -113,6 +113,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.ReportR
 	if session.Kind != domain.KindWorker {
 		return domain.ReportRecord{}, apierr.Invalid("REPORT_WORKER_REQUIRED", "Reports can only be created by worker sessions", nil)
 	}
+	if session.ProjectID == "" {
+		return domain.ReportRecord{}, apierr.Invalid("REPORT_PROJECT_REQUIRED", "Reports require a project-scoped worker session", nil)
+	}
 
 	now := s.now().UTC()
 	var availableAt time.Time
