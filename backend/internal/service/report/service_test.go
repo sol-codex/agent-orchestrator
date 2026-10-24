@@ -2,10 +2,14 @@ package report
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 )
 
 type fakeStore struct {
@@ -13,6 +17,43 @@ type fakeStore struct {
 	ok      bool
 	created domain.ReportRecord
 	reports []domain.ReportRecord
+}
+
+func TestCreateRejectsStandaloneBeforePersistenceOrDelivery(t *testing.T) {
+	for _, input := range []CreateInput{
+		{State: domain.ReportCheckpoint, Note: "checkpoint"},
+		{State: domain.ReportNeedsInput, Note: "decision"},
+		{State: domain.ReportStuck, Note: "blocked"},
+		{State: domain.ReportDone, Note: "done"},
+		{Message: "status"},
+		{Outputs: []domain.ReportOutput{{Kind: domain.ReportOutputArtifact, Reference: "result.md"}}},
+	} {
+		t.Run(string(input.State)+input.Message, func(t *testing.T) {
+			st := &fakeStore{ok: true, session: domain.SessionRecord{ID: "standalone-1", Kind: domain.KindWorker}}
+			var artifacts artifactCalls
+			called := false
+			svc := New(Deps{Store: st, Artifacts: &artifacts, OnCreated: func(domain.ReportRecord) { called = true }})
+			input.SessionID = st.session.ID
+			_, err := svc.Create(context.Background(), input)
+			if err == nil {
+				t.Fatal("expected project-scoped worker error")
+			}
+			response := httptest.NewRecorder()
+			envelope.WriteError(response, httptest.NewRequest(http.MethodPost, "/api/v1/reports", nil), err)
+			var body struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusBadRequest || body.Code != "REPORT_PROJECT_REQUIRED" {
+				t.Fatalf("response = %d %s", response.Code, response.Body.String())
+			}
+			if st.created.ID != "" || called || len(artifacts) != 0 {
+				t.Fatal("rejected report caused persistence or delivery effects")
+			}
+		})
+	}
 }
 
 func (f *fakeStore) GetSession(context.Context, domain.SessionID) (domain.SessionRecord, bool, error) {
